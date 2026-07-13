@@ -1,0 +1,856 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LeadCRM</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body class="auth-required">
+
+    <div class="bg-mesh" aria-hidden="true">
+      <div class="mesh-orb mesh-orb-1"></div>
+      <div class="mesh-orb mesh-orb-2"></div>
+      <div class="mesh-orb mesh-orb-3"></div>
+    </div>
+
+    <section class="login-screen" id="loginScreen">
+      <form class="login-card" id="loginForm">
+        <div class="brand login-brand">
+          <div class="brand-mark">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="white" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div>
+            <strong>LeadCRM</strong>
+            <span>Accesso riservato</span>
+          </div>
+        </div>
+        <label>
+          <span>Email</span>
+          <input name="email" type="email" autocomplete="username" value="t.v.webspecialist@gmail.com" required>
+        </label>
+        <label>
+          <span>Password</span>
+          <input name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <button class="primary full" type="submit">
+          <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6A2.25 2.25 0 005.25 5.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg>
+          <span>Entra</span>
+        </button>
+        <p class="login-error" id="loginError"></p>
+      </form>
+    </section>
+
+    <div class="app-shell">
+      <aside class="rail">
+        <div class="brand">
+          <div class="brand-mark">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="white" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div>
+            <strong>LeadCRM</strong>
+            <span>Acquisizione locale</span>
+          </div>
+        </div>
+
+        <nav class="nav-list" aria-label="Sezioni">
+          <button class="nav-item active" data-view="dashboard">
+            <svg class="nav-icon" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+            <span>Dashboard</span>
+          </button>
+          <button class="nav-item" data-view="leads">
+            <svg class="nav-icon" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/></svg>
+            <span>Lead</span>
+          </button>
+          <button class="nav-item" data-view="discovery">
+            <svg class="nav-icon" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803 7.5 7.5 0 0015.803 15.803z"/></svg>
+            <span>Ricerca</span>
+          </button>
+          <button class="nav-item" data-view="map">
+            <svg class="nav-icon" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M9 18.75l-6-2.25V5.25L9 7.5m0 11.25l6-2.25m-6 2.25V7.5m6 9l6 2.25V7.5l-6-2.25m0 11.25V5.25M9 7.5l6-2.25"/></svg>
+            <span>Mappa</span>
+          </button>
+          <button class="nav-item" data-view="messages">
+            <svg class="nav-icon" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"/></svg>
+            <span>Messaggi</span>
+          </button>
+          <button class="nav-item" data-view="settings">
+            <svg class="nav-icon" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 011.45.12l.773.774c.39.389.44 1.002.12 1.45l-.527.737c-.25.35-.272.806-.107 1.204.165.397.505.71.93.78l.893.15c.543.09.94.56.94 1.109v1.094c0 .55-.397 1.02-.94 1.11l-.893.149c-.425.07-.765.383-.93.78-.165.398-.143.854.107 1.204l.527.738c.32.447.269 1.06-.12 1.45l-.774.773a1.125 1.125 0 01-1.449.12l-.738-.527c-.35-.25-.806-.272-1.203-.107-.397.165-.71.505-.781.929l-.149.894c-.09.542-.56.94-1.11.94h-1.094c-.55 0-1.019-.398-1.11-.94l-.148-.894c-.071-.424-.384-.764-.781-.93-.398-.164-.854-.142-1.204.108l-.738.527c-.447.32-1.06.269-1.45-.12l-.773-.774a1.125 1.125 0 01-.12-1.45l.527-.737c.25-.35.273-.806.108-1.204-.165-.397-.505-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.109v-1.094c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.107-1.204l-.527-.738a1.125 1.125 0 01.12-1.45l.773-.773a1.125 1.125 0 011.45-.12l.737.527c.35.25.807.272 1.204.107.397-.165.71-.505.78-.929l.15-.894z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            <span>Provider</span>
+          </button>
+          <button class="nav-item" data-view="users" data-super-admin>
+            <svg class="nav-icon" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.742-.586 3.75 3.75 0 00-6.702-2.331M15 11.25a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zM12 14.25c-3.729 0-6.75 1.678-6.75 3.75v.75h13.5V18c0-2.072-3.021-3.75-6.75-3.75z"/></svg>
+            <span>Utenti</span>
+          </button>
+        </nav>
+
+        <div class="rail-actions">
+          <div class="rail-card">
+            <span>Database locale</span>
+            <strong>SQLite sul tuo Mac</strong>
+          </div>
+          <button class="secondary full" id="exportBtn">
+            <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+            <span>Export CSV</span>
+          </button>
+        </div>
+      </aside>
+
+      <main class="main-area">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="viewEyebrow">Pipeline commerciale</p>
+            <h1 id="viewTitle">Dashboard</h1>
+          </div>
+          <div class="topbar-actions">
+            <div class="user-pill" id="currentUserPill">
+              <strong id="currentUserName">-</strong>
+              <span id="currentUserRole">-</span>
+            </div>
+            <div class="search-wrap">
+              <svg class="search-prefix-icon" width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803 7.5 7.5 0 0015.803 15.803z"/></svg>
+              <input id="globalSearch" type="search" placeholder="Cerca azienda, città, settore…">
+            </div>
+            <button class="icon-button secondary" id="refreshBtn" title="Aggiorna" aria-label="Aggiorna">
+              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
+            </button>
+            <button class="primary" id="newLeadBtn">
+              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+              <span>Nuovo lead</span>
+            </button>
+            <button class="secondary" id="logoutBtn">
+              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6A2.25 2.25 0 005.25 5.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg>
+              <span>Esci</span>
+            </button>
+          </div>
+        </header>
+
+        <!-- Dashboard -->
+        <section class="view active" id="dashboardView">
+          <div class="dashboard-shell">
+            <div class="dashboard-main">
+              <article class="tool-panel command-panel command-main dashboard-focus">
+                <div class="section-heading compact">
+                  <div>
+                    <h2>Cosa faccio oggi</h2>
+                    <p class="lead-meta">Priorita ordinate per score, contatto disponibile e urgenza commerciale.</p>
+                  </div>
+                  <span id="todayCount">0 priorita</span>
+                </div>
+                <div class="work-list today-list" id="todayWorkList"></div>
+              </article>
+
+              <div class="metric-grid dashboard-metrics">
+                <article class="metric metric-blue">
+                  <div class="metric-icon">
+                    <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/></svg>
+                  </div>
+                  <span>Lead totali</span>
+                  <strong id="statTotal">0</strong>
+                </article>
+                <article class="metric metric-red">
+                  <div class="metric-icon">
+                    <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 18a3.75 3.75 0 00.495-7.467 5.99 5.99 0 00-1.925 3.546 5.974 5.974 0 01-2.133-1A3.75 3.75 0 0012 18z"/></svg>
+                  </div>
+                  <span>Alta opportunita</span>
+                  <strong id="statHot">0</strong>
+                </article>
+                <article class="metric metric-green">
+                  <div class="metric-icon">
+                    <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253M3.284 14.253A8.959 8.959 0 013 12c0-.778.099-1.533.284-2.253"/></svg>
+                  </div>
+                  <span>Senza sito</span>
+                  <strong id="statNoSite">0</strong>
+                </article>
+                <article class="metric metric-amber">
+                  <div class="metric-icon">
+                    <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  </div>
+                  <span>Azioni oggi</span>
+                  <strong id="statDue">0</strong>
+                </article>
+                <article class="metric metric-blue">
+                  <div class="metric-icon">
+                    <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M11.42 15.17L17.25 21A2.652 2.652 0 0021 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 11-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 004.486-6.336l-3.276 3.277a3.004 3.004 0 01-2.25-2.25l3.276-3.276a4.5 4.5 0 00-6.336 4.486c.048.58.024 1.193-.14 1.743m0 0L9.88 11.626"/></svg>
+                  </div>
+                  <span>Da arricchire</span>
+                  <strong id="statEnrich">0</strong>
+                </article>
+              </div>
+
+              <article class="tool-panel pipeline-panel">
+                <div class="section-heading">
+                  <h2>Pipeline</h2>
+                  <span id="pipelineCount">0 lead</span>
+                </div>
+                <div class="pipeline-board" id="pipelineBoard"></div>
+              </article>
+            </div>
+
+            <aside class="dashboard-side">
+              <article class="tool-panel quick-actions-panel">
+                <div class="section-heading compact"><h2>Azioni rapide</h2></div>
+                <div class="quick-action-grid">
+                  <button class="secondary" data-go-view="discovery" type="button">
+                    <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803 7.5 7.5 0 0015.803 15.803z"/></svg>
+                    <span>Trova lead</span>
+                  </button>
+                  <button class="secondary" id="dashboardNewLeadBtn" type="button">
+                    <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+                    <span>Nuovo lead</span>
+                  </button>
+                  <button class="secondary" data-go-view="leads" type="button">
+                    <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 5.25h16.5M3.75 12h16.5M3.75 18.75h16.5"/></svg>
+                    <span>Gestisci lead</span>
+                  </button>
+                  <button class="secondary" data-go-view="map" type="button">
+                    <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4"><path stroke-linecap="round" stroke-linejoin="round" d="M9 18.75l-6-2.25V5.25L9 7.5m0 11.25l6-2.25m-6 2.25V7.5m6 9l6 2.25V7.5l-6-2.25m0 11.25V5.25M9 7.5l6-2.25"/></svg>
+                    <span>Apri mappa</span>
+                  </button>
+                </div>
+              </article>
+
+              <article class="tool-panel reminder-panel">
+                <div class="section-heading compact">
+                  <h2>Note e reminder</h2>
+                  <span id="reminderCount">0 attivi</span>
+                </div>
+                <form id="reminderForm" class="reminder-form">
+                  <div class="form-grid two">
+                    <label><span>Lead</span><select name="lead_id" id="reminderLeadSelect"></select></label>
+                    <label><span>Utente</span><select name="assigned_user_id" id="reminderUserSelect"></select></label>
+                  </div>
+                  <div class="form-grid two">
+                    <label><span>Scadenza</span><input name="due_at" type="date"></label>
+                    <label><span>Titolo</span><input name="subject" placeholder="Follow-up, chiamata, nota" required></label>
+                  </div>
+                  <label><span>Nota</span><textarea name="body" rows="3" placeholder="Cosa va fatto?"></textarea></label>
+                  <button class="primary" type="submit">
+                    <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+                    <span>Aggiungi reminder</span>
+                  </button>
+                </form>
+                <div class="reminder-list" id="reminderList"></div>
+              </article>
+
+              <article class="tool-panel command-panel">
+                <div class="section-heading compact">
+                  <h2>Base commerciale</h2>
+                  <span id="workbenchAvgScore">0 score</span>
+                </div>
+                <div class="mini-stat-grid" id="workbenchSummary"></div>
+              </article>
+            </aside>
+          </div>
+
+          <div class="dashboard-work-grid">
+            <article class="tool-panel command-panel">
+              <div class="section-heading compact">
+                <h2>Lead caldi</h2>
+                <span id="hotWorkCount">0</span>
+              </div>
+              <div class="work-list compact" id="hotWorkList"></div>
+            </article>
+
+            <article class="tool-panel command-panel">
+              <div class="section-heading compact">
+                <h2>Audit vendibili</h2>
+                <span id="auditWorkCount">0</span>
+              </div>
+              <div class="work-list compact" id="auditWorkList"></div>
+            </article>
+
+            <article class="tool-panel command-panel">
+              <div class="section-heading compact">
+                <h2>Da arricchire</h2>
+                <span id="enrichWorkCount">0</span>
+              </div>
+              <div class="work-list compact" id="enrichWorkList"></div>
+            </article>
+          </div>
+        </section>
+
+        <!-- Leads -->
+        <section class="view" id="leadsView">
+          <div class="lead-page-head">
+            <div>
+              <h2>Database lead</h2>
+              <p class="lead-meta">Filtra, seleziona e modifica i lead in blocco. Il dettaglio si apre come popup.</p>
+            </div>
+            <button class="secondary" id="toggleTrashPanelBtn" type="button">
+              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.3"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166M19.228 5.79L18.16 19.673A2.25 2.25 0 0115.916 21H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .397c.34-.059.68-.114 1.022-.166m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916A2.25 2.25 0 0013.5 2.25h-3A2.25 2.25 0 008.25 4.5v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
+              <span>Cestino lead</span>
+              <small id="trashInlineCount">0</small>
+            </button>
+          </div>
+          <div class="filters-row">
+            <select id="filterStage" aria-label="Fase"></select>
+            <select id="filterCategory" aria-label="Categoria"></select>
+            <select id="filterPriority" aria-label="Priorità"></select>
+            <label class="check-pill">
+              <input type="checkbox" id="hotOnly">
+              <span>Score 75+</span>
+            </label>
+          </div>
+          <div class="bulk-action-bar hidden" id="bulkActionBar">
+            <div class="bulk-selection-count">
+              <strong id="bulkSelectedCount">0 selezionati</strong>
+              <span>Modifica più lead insieme</span>
+            </div>
+            <select id="bulkStageSelect" aria-label="Imposta fase"></select>
+            <select id="bulkCategorySelect" aria-label="Imposta categoria"></select>
+            <select id="bulkPrioritySelect" aria-label="Imposta priorità"></select>
+            <input id="bulkFollowUpInput" type="date" aria-label="Imposta follow-up">
+            <button class="secondary" id="bulkApplyBtn" type="button">
+              <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+              <span>Applica</span>
+            </button>
+            <button class="danger" id="bulkDeleteBtn" type="button">
+              <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166M19.228 5.79L18.16 19.673A2.25 2.25 0 0115.916 21H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .397c.34-.059.68-.114 1.022-.166m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916A2.25 2.25 0 0013.5 2.25h-3A2.25 2.25 0 008.25 4.5v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
+              <span>Elimina</span>
+            </button>
+            <button class="ghost" id="bulkClearBtn" type="button">Deseleziona</button>
+          </div>
+          <div class="table-wrap">
+            <table class="lead-table">
+              <thead>
+                <tr>
+                  <th class="select-col">
+                    <input type="checkbox" id="selectAllLeads" aria-label="Seleziona tutti i lead visibili">
+                  </th>
+                  <th>Azienda</th>
+                  <th>Settore</th>
+                  <th>Città</th>
+                  <th>Categoria</th>
+                  <th>Fase</th>
+                  <th>Score</th>
+                  <th>Follow-up</th>
+                </tr>
+              </thead>
+              <tbody id="leadTableBody"></tbody>
+            </table>
+          </div>
+
+          <div class="trash-panel hidden" id="trashPanel">
+            <div class="section-heading">
+              <div>
+                <h2>Cestino lead</h2>
+                <p class="lead-meta">Qui trovi i lead eliminati e puoi ripristinarli nel CRM attivo.</p>
+              </div>
+              <span id="trashCount">0 eliminati</span>
+            </div>
+            <div class="bulk-action-bar hidden" id="trashBulkActionBar">
+              <div class="bulk-selection-count">
+                <strong id="trashSelectedCount">0 selezionati</strong>
+                <span>Recupera lead eliminati</span>
+              </div>
+              <button class="secondary" id="trashBulkRestoreBtn" type="button">
+                <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3"/></svg>
+                <span>Ripristina selezionati</span>
+              </button>
+              <button class="ghost" id="trashClearBtn" type="button">Deseleziona</button>
+            </div>
+            <div class="table-wrap">
+              <table class="lead-table">
+                <thead>
+                  <tr>
+                    <th class="select-col">
+                      <input type="checkbox" id="selectAllDeletedLeads" aria-label="Seleziona tutti i lead eliminati visibili">
+                    </th>
+                    <th>Azienda</th>
+                    <th>Settore</th>
+                    <th>Citta</th>
+                    <th>Categoria</th>
+                    <th>Eliminato il</th>
+                    <th>Azioni</th>
+                  </tr>
+                </thead>
+                <tbody id="trashTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- Map -->
+        <section class="view" id="mapView">
+          <div class="map-layout">
+            <article class="tool-panel map-panel">
+              <div class="section-heading compact">
+                <h2>Mappa opportunità</h2>
+                <span id="mapStatus">0 pin</span>
+              </div>
+              <div class="map-legend">
+                <span><i class="map-dot red"></i>Senza sito</span>
+                <span><i class="map-dot orange"></i>Sito critico</span>
+                <span><i class="map-dot yellow"></i>Social deboli</span>
+                <span><i class="map-dot green"></i>Bassa priorità</span>
+              </div>
+              <div class="opportunity-map" id="opportunityMap"></div>
+            </article>
+
+            <aside class="map-side">
+              <article class="tool-panel">
+                <div class="section-heading compact"><h2>Copertura</h2></div>
+                <div class="mini-stat-grid" id="mapMetrics"></div>
+              </article>
+              <article class="tool-panel">
+                <div class="section-heading compact"><h2>Top zona</h2></div>
+                <div class="work-list compact" id="mapLeadList"></div>
+              </article>
+            </aside>
+          </div>
+        </section>
+
+        <!-- Discovery -->
+        <section class="view" id="discoveryView">
+          <div class="free-mode-note">
+            <strong>Modalità solo gratis</strong>
+            <span>Ricerca con OpenStreetMap. Google Maps resta spento finché non lo abiliti dalla pagina Provider.</span>
+          </div>
+          <article class="tool-panel finder-panel">
+            <div class="section-heading compact">
+              <h2>Lead Finder</h2>
+              <span id="finderStatus">Pronto</span>
+            </div>
+            <form id="leadFinderForm" class="finder-grid">
+              <label>
+                <span>Zona</span>
+                <input name="city" placeholder="Roma, Milano, Torino" required>
+              </label>
+              <label>
+                <span>Settore</span>
+                <select name="sector" id="finderSector"></select>
+              </label>
+              <label>
+                <span>Sorgente</span>
+                <select name="provider" id="finderProvider">
+                  <option value="osm">OpenStreetMap gratis</option>
+                </select>
+              </label>
+              <label>
+                <span>Limite</span>
+                <input name="limit" type="number" min="5" max="80" value="25">
+              </label>
+              <label class="check-pill">
+                <input type="checkbox" name="only_without_website" checked>
+                <span>Solo senza sito</span>
+              </label>
+              <label class="check-pill">
+                <input type="checkbox" name="require_contact" checked>
+                <span>Solo con contatto</span>
+              </label>
+              <label class="check-pill">
+                <input type="checkbox" name="save" checked>
+                <span>Salva nel CRM</span>
+              </label>
+              <button class="primary" type="submit">
+                <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803 7.5 7.5 0 0015.803 15.803z"/></svg>
+                <span>Trova lead</span>
+              </button>
+            </form>
+            <div class="finder-live">
+              <div class="finder-map" id="finderMap">
+                <div class="finder-map-empty">Avvia una ricerca per vedere i lead sulla mappa.</div>
+              </div>
+              <div class="finder-results" id="finderResults"></div>
+            </div>
+          </article>
+
+          <article class="tool-panel batch-panel hidden">
+            <div class="section-heading compact">
+              <h2>Scanner batch</h2>
+              <span id="batchScannerStatus">Pronto</span>
+            </div>
+            <form id="batchScannerForm" class="batch-grid">
+              <label>
+                <span>Sorgente</span>
+                <select name="provider" id="batchProvider">
+                  <option value="auto">Auto gratis</option>
+                  <option value="osm">OpenStreetMap gratis</option>
+                </select>
+              </label>
+              <label>
+                <span>Zone</span>
+                <textarea name="zones" id="batchZonesInput" rows="4"></textarea>
+              </label>
+              <label>
+                <span>Lead per ricerca</span>
+                <input name="per_query_limit" type="number" min="2" max="25" value="6">
+              </label>
+              <label>
+                <span>Combinazioni max</span>
+                <input name="max_queries" type="number" min="1" max="40" value="12">
+              </label>
+              <label class="check-pill">
+                <input type="checkbox" name="only_without_website" checked>
+                <span>Solo senza sito</span>
+              </label>
+              <label class="check-pill">
+                <input type="checkbox" name="require_contact" checked>
+                <span>Solo con contatto</span>
+              </label>
+              <label class="check-pill">
+                <input type="checkbox" name="save" checked>
+                <span>Salva nel CRM</span>
+              </label>
+              <button class="primary" type="submit">
+                <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
+                <span>Avvia batch</span>
+              </button>
+            </form>
+            <div class="finder-results" id="batchScannerResults"></div>
+          </article>
+
+          <div class="work-grid hidden">
+            <article class="tool-panel">
+              <div class="section-heading compact"><h2>Lead rapido</h2></div>
+              <form id="quickLeadForm" class="form-grid">
+                <label><span>Azienda</span><input name="company_name" required></label>
+                <label><span>Settore</span><input name="sector"></label>
+                <label><span>Città</span><input name="city"></label>
+                <label><span>Sito</span><input name="website" placeholder="https://"></label>
+                <label><span>Fonte</span><input name="source" placeholder="manuale, directory, referral"></label>
+                <button class="primary" type="submit">Salva lead</button>
+              </form>
+            </article>
+
+            <article class="tool-panel">
+              <div class="section-heading compact"><h2>Scanner URL</h2></div>
+              <form id="scanUrlForm" class="form-grid">
+                <label><span>URL</span><input name="url" placeholder="https://example.it" required></label>
+                <button class="primary" type="submit">Scansiona</button>
+              </form>
+              <div class="scan-result" id="standaloneScanResult"></div>
+            </article>
+
+            <article class="tool-panel">
+              <div class="section-heading compact"><h2>Import CSV</h2></div>
+              <div class="import-box">
+                <input type="file" id="csvInput" accept=".csv,text/csv">
+                <button class="secondary" id="importBtn">Importa</button>
+              </div>
+              <div class="hint-line">Campi: company_name, sector, city, website, source, email, phone</div>
+            </article>
+          </div>
+        </section>
+
+        <!-- Messages -->
+        <section class="view" id="messagesView">
+          <div class="message-empty" id="messageEmpty">
+            <div class="message-empty-icon">
+              <svg width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"/></svg>
+            </div>
+            <h2>Seleziona un lead</h2>
+            <p>Il generatore usa categoria, problemi rilevati e contatti disponibili.</p>
+          </div>
+          <div class="message-panel hidden" id="messagePanel">
+            <div class="section-heading compact">
+              <h2 id="messageLeadName">Messaggio</h2>
+            </div>
+            <div class="message-controls">
+              <select id="messageChannel" aria-label="Canale">
+                <option value="email">Email</option>
+                <option value="instagram">Instagram</option>
+              </select>
+              <input id="messageOffer" placeholder="Offerta o pacchetto">
+              <label class="check-pill compact-pill">
+                <input type="checkbox" id="messageUseAI">
+                <span>AI</span>
+              </label>
+              <button class="primary" id="generateMessageBtn">Genera</button>
+            </div>
+            <label class="message-field">
+              <span>Oggetto</span>
+              <input id="messageSubject">
+            </label>
+            <label class="message-field">
+              <span>Testo</span>
+              <textarea id="messageBody" rows="12"></textarea>
+            </label>
+            <div class="button-row">
+              <button class="secondary" id="copyMessageBtn">Copia</button>
+              <button class="secondary" id="mailtoBtn">Apri email</button>
+              <button class="secondary" id="logMessageBtn">Segna contatto</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Settings -->
+        <section class="view" id="settingsView">
+          <div class="settings-layout">
+            <article class="tool-panel">
+              <div class="section-heading compact">
+                <h2>Chiavi provider</h2>
+                <span id="settingsSaveStatus">Pronto</span>
+              </div>
+              <form id="settingsForm" class="form-grid two">
+                <label>
+                  <span>Google Maps / Places API key</span>
+                  <input name="google_places_api_key" type="password" autocomplete="off" placeholder="Lascia vuoto per non cambiare">
+                </label>
+                <label class="check-pill">
+                  <input name="google_places_enabled" id="googlePlacesEnabledInput" type="checkbox">
+                  <span>Abilita Maps a consumo</span>
+                </label>
+                <label>
+                  <span>Provider AI</span>
+                  <select name="ai_provider" id="aiProviderSelect">
+                    <option value="auto">Auto</option>
+                    <option value="anthropic">Claude</option>
+                    <option value="openai">OpenAI</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Claude / Anthropic API key</span>
+                  <input name="anthropic_api_key" type="password" autocomplete="off" placeholder="Lascia vuoto per non cambiare">
+                </label>
+                <label>
+                  <span>Modello Claude</span>
+                  <input name="anthropic_model" id="anthropicModelInput" autocomplete="off">
+                </label>
+                <label>
+                  <span>OpenAI API key</span>
+                  <input name="openai_api_key" type="password" autocomplete="off" placeholder="Lascia vuoto per non cambiare">
+                </label>
+                <label>
+                  <span>Modello OpenAI</span>
+                  <input name="openai_model" id="openaiModelInput" autocomplete="off">
+                </label>
+                <label>
+                  <span>Budget mensile</span>
+                  <input name="monthly_budget_eur" id="monthlyBudgetInput" type="number" min="0" step="1" placeholder="EUR">
+                </label>
+                <button class="primary" type="submit">
+                  <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  <span>Salva provider</span>
+                </button>
+              </form>
+            </article>
+            <article class="tool-panel">
+              <div class="section-heading compact">
+                <h2>Stato motori</h2>
+                <span id="providerStatusLabel">Non configurato</span>
+              </div>
+              <div class="status-grid" id="providerStatusGrid"></div>
+            </article>
+          </div>
+
+          <div class="strategy-layout">
+            <article class="tool-panel strategy-form-panel">
+              <div class="section-heading compact">
+                <h2>Strategia acquisizione</h2>
+                <span id="strategySaveStatus">Pronta</span>
+              </div>
+              <form id="strategyForm" class="form-grid">
+                <label>
+                  <span>Zone target</span>
+                  <textarea name="target_zones" id="targetZonesInput" rows="4" placeholder="Milano&#10;Brescia&#10;Verona"></textarea>
+                </label>
+                <div>
+                  <span class="field-label">Categorie ricerca</span>
+                  <div class="sector-check-grid" id="strategySectorChecks"></div>
+                </div>
+                <div class="form-grid two">
+                  <label>
+                    <span>Limite ricerca</span>
+                    <input name="places_default_limit" id="placesDefaultLimitInput" type="number" min="5" max="80">
+                  </label>
+                  <label>
+                    <span>Prezzo minimo AI</span>
+                    <input name="openai_price_floor" id="openaiPriceFloorInput" type="number" min="0" step="50">
+                  </label>
+                  <label>
+                    <span>Prezzo massimo AI</span>
+                    <input name="openai_price_ceiling" id="openaiPriceCeilingInput" type="number" min="0" step="50">
+                  </label>
+                </div>
+                <div class="button-row strategy-toggles">
+                  <label class="check-pill">
+                    <input type="checkbox" name="places_only_without_website" id="placesOnlyWithoutWebsiteInput">
+                    <span>Solo senza sito</span>
+                  </label>
+                  <label class="check-pill">
+                    <input type="checkbox" name="places_require_contact" id="placesRequireContactInput">
+                    <span>Solo con contatto</span>
+                  </label>
+                </div>
+                <button class="primary" type="submit">
+                  <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  <span>Salva strategia</span>
+                </button>
+              </form>
+            </article>
+
+            <article class="tool-panel strategy-summary-panel">
+              <div class="section-heading compact">
+                <h2>Ricerca gratuita</h2>
+              </div>
+              <div class="strategy-summary" id="strategyGoogleSummary"></div>
+            </article>
+
+            <article class="tool-panel strategy-summary-panel">
+              <div class="section-heading compact">
+                <h2>OpenAI</h2>
+              </div>
+              <div class="strategy-summary" id="strategyAiSummary"></div>
+            </article>
+          </div>
+
+          <div class="ai-control-layout">
+            <article class="tool-panel ai-control-panel">
+              <div class="section-heading compact">
+                <h2>AI Control Center</h2>
+                <span id="aiControlSaveStatus">Pronto</span>
+              </div>
+              <form id="aiControlForm" class="form-grid">
+                <div class="form-grid two">
+                  <label>
+                    <span>Nome venditore</span>
+                    <input name="ai_seller_name" id="aiSellerNameInput">
+                  </label>
+                  <label>
+                    <span>Nome brand</span>
+                    <input name="ai_business_name" id="aiBusinessNameInput">
+                  </label>
+                  <label>
+                    <span>Tono</span>
+                    <input name="ai_tone" id="aiToneInput">
+                  </label>
+                  <label>
+                    <span>Stile messaggi</span>
+                    <input name="ai_message_style" id="aiMessageStyleInput">
+                  </label>
+                </div>
+                <label>
+                  <span>Servizi</span>
+                  <textarea name="ai_services" id="aiServicesInput" rows="5"></textarea>
+                </label>
+                <label>
+                  <span>Cliente ideale</span>
+                  <textarea name="ai_ideal_customer" id="aiIdealCustomerInput" rows="3"></textarea>
+                </label>
+                <label>
+                  <span>Offerta focus</span>
+                  <textarea name="ai_offer_focus" id="aiOfferFocusInput" rows="3"></textarea>
+                </label>
+                <div class="form-grid two">
+                  <label>
+                    <span>Prove commerciali</span>
+                    <textarea name="ai_proof_points" id="aiProofPointsInput" rows="5"></textarea>
+                  </label>
+                  <label>
+                    <span>Follow-up</span>
+                    <textarea name="ai_followup_plan" id="aiFollowupPlanInput" rows="5"></textarea>
+                  </label>
+                </div>
+                <button class="primary" type="submit">
+                  <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  <span>Salva AI</span>
+                </button>
+              </form>
+            </article>
+
+            <article class="tool-panel ai-control-summary-panel">
+              <div class="section-heading compact">
+                <h2>Profilo AI</h2>
+              </div>
+              <div class="strategy-summary" id="aiControlSummary"></div>
+            </article>
+          </div>
+        </section>
+
+        <!-- Users -->
+        <section class="view" id="usersView" data-super-admin>
+          <div class="users-layout">
+            <article class="tool-panel">
+              <div class="section-heading compact">
+                <h2>Crea utente</h2>
+                <span id="userCreateStatus">Super admin</span>
+              </div>
+              <form id="createUserForm" class="form-grid two">
+                <label>
+                  <span>Nome</span>
+                  <input name="name" autocomplete="name" required>
+                </label>
+                <label>
+                  <span>Email</span>
+                  <input name="email" type="email" autocomplete="username" required>
+                </label>
+                <label>
+                  <span>Password temporanea</span>
+                  <input name="password" type="password" autocomplete="new-password" required>
+                </label>
+                <label>
+                  <span>Ruolo</span>
+                  <select name="role" id="newUserRoleSelect"></select>
+                </label>
+                <label class="check-pill">
+                  <input name="is_active" type="checkbox" checked>
+                  <span>Account attivo</span>
+                </label>
+                <button class="primary" type="submit">
+                  <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M18 7.5v3m0 0v3m0-3h3m-3 0h-3M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zM3 19.125a6.375 6.375 0 0112.75 0v.003L15.75 21H3v-1.875z"/></svg>
+                  <span>Crea utente</span>
+                </button>
+              </form>
+            </article>
+
+            <article class="tool-panel">
+              <div class="section-heading compact">
+                <h2>Utenti attivi</h2>
+                <span id="usersCount">0</span>
+              </div>
+              <div class="users-list" id="usersList"></div>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="leadDetailDialog" class="lead-detail-dialog">
+      <div class="lead-detail-modal" id="leadDetailContent"></div>
+    </dialog>
+
+    <dialog id="leadDialog">
+      <form method="dialog" class="dialog-card" id="leadForm">
+        <header>
+          <h2 id="leadDialogTitle">Nuovo lead</h2>
+          <button class="ghost icon-button" value="cancel" type="submit" aria-label="Chiudi">
+            <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </header>
+        <input type="hidden" name="id">
+        <div class="form-grid two">
+          <label><span>Azienda</span><input name="company_name" required></label>
+          <label><span>Settore</span><input name="sector"></label>
+          <label><span>Città</span><input name="city"></label>
+          <label><span>Indirizzo</span><input name="address"></label>
+          <label><span>Sito</span><input name="website" placeholder="https://"></label>
+          <label><span>Fonte</span><input name="source"></label>
+          <label><span>Categoria</span><select name="category" id="leadCategorySelect"></select></label>
+          <label><span>Fase</span><select name="stage" id="leadStageSelect"></select></label>
+          <label><span>Priorità</span><select name="priority" id="leadPrioritySelect"></select></label>
+          <label><span>Follow-up</span><input type="date" name="next_follow_up"></label>
+        </div>
+        <label class="wide-label">
+          <span>Note</span>
+          <textarea name="notes" rows="4"></textarea>
+        </label>
+        <footer>
+          <button class="secondary" value="cancel" type="submit">Annulla</button>
+          <button class="primary" id="saveLeadBtn" value="default" type="button">Salva</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

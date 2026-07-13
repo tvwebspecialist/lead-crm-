@@ -1,0 +1,2040 @@
+const state = {
+  bootstrap: null,
+  leads: [],
+  selectedLead: null,
+  selectedLeadIds: new Set(),
+  deletedLeads: [],
+  selectedDeletedLeadIds: new Set(),
+  trashOpen: false,
+  view: "dashboard",
+  searchTimer: null,
+  discoveryResults: [],
+  reminders: [],
+  team: [],
+  notifiedReminderIds: new Set(),
+  providers: null,
+  strategy: null,
+  aiControl: null,
+  workbench: null,
+  map: null,
+  currentUser: null,
+  users: [],
+  roles: {},
+  eventsBound: false,
+};
+
+const $ = (selector, root = document) => root.querySelector(selector);
+const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+
+function todayDateString() {
+  const date = new Date();
+  const offset = date.getTimezoneOffset();
+  return new Date(date.getTime() - offset * 60000).toISOString().slice(0, 10);
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    ...options,
+  });
+  const contentType = response.headers.get("content-type") || "";
+  const payload = contentType.includes("application/json") ? await response.json() : await response.text();
+  if (!response.ok) {
+    if (response.status === 401 && !["/api/login", "/api/session"].includes(path)) {
+      showLogin();
+    }
+    throw new Error(payload.error || payload || "Errore");
+  }
+  return payload;
+}
+
+function toast(message) {
+  const el = $("#toast");
+  el.textContent = message;
+  el.classList.add("show");
+  window.clearTimeout(el._timer);
+  el._timer = window.setTimeout(() => el.classList.remove("show"), 2600);
+}
+
+function optionList(items, includeAll = true) {
+  return `${includeAll ? '<option value="Tutti">Tutti</option>' : ""}${items
+    .map((item) => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`)
+    .join("")}`;
+}
+
+function roleOptions(selected = "member") {
+  const roles = state.roles || {};
+  return Object.entries(roles)
+    .map(([key, label]) => `<option value="${escapeHtml(key)}" ${key === selected ? "selected" : ""}>${escapeHtml(label)}</option>`)
+    .join("");
+}
+
+function escapeHtml(value = "") {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function formatDate(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("it-IT", { year: "2-digit", month: "2-digit", day: "2-digit" });
+}
+
+function externalHref(url = "") {
+  const trimmed = String(url).trim();
+  if (!trimmed) return "";
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+function scoreChip(score) {
+  const n = Number(score || 0);
+  const tone = n >= 75 ? "hot" : n >= 55 ? "mid" : "ok";
+  return `<span class="chip score-chip ${tone}">${n}</span>`;
+}
+
+function categoryChip(category) {
+  const tone = category === "Nessun sito" || category === "Sito critico" ? "hot" : category === "Sito migliorabile" ? "mid" : "info";
+  return `<span class="chip ${tone}">${escapeHtml(category || "Da qualificare")}</span>`;
+}
+
+function bindAuthEvents() {
+  $("#loginForm").addEventListener("submit", login);
+}
+
+function showLogin() {
+  state.currentUser = null;
+  document.body.classList.add("auth-required");
+  document.body.classList.remove("app-ready");
+}
+
+function hideLogin() {
+  document.body.classList.remove("auth-required");
+  document.body.classList.add("app-ready");
+  $("#loginError").textContent = "";
+}
+
+function canManageUsers() {
+  return state.currentUser?.role === "super_admin";
+}
+
+function applyRoleVisibility() {
+  $$("[data-super-admin]").forEach((node) => {
+    node.classList.toggle("hidden", !canManageUsers());
+  });
+  if (!canManageUsers() && state.view === "users") switchView("dashboard");
+}
+
+function renderCurrentUser() {
+  const user = state.currentUser || {};
+  $("#currentUserName").textContent = user.name || user.email || "-";
+  $("#currentUserRole").textContent = user.role_label || state.roles?.[user.role] || user.role || "-";
+}
+
+async function login(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  $("#loginError").textContent = "";
+  try {
+    const data = await api("/api/login", { method: "POST", body: JSON.stringify(formPayload(form)) });
+    form.elements.password.value = "";
+    await bootApp(data.user);
+    toast("Accesso effettuato");
+  } catch (error) {
+    $("#loginError").textContent = error.message;
+  }
+}
+
+async function logout() {
+  await api("/api/logout", { method: "POST", body: JSON.stringify({}) });
+  showLogin();
+  toast("Sessione chiusa");
+}
+
+async function init() {
+  bindAuthEvents();
+  const session = await api("/api/session");
+  state.roles = session.roles || {};
+  if (!session.user) {
+    showLogin();
+    return;
+  }
+  await bootApp(session.user);
+}
+
+async function bootApp(user) {
+  state.currentUser = user;
+  hideLogin();
+  state.bootstrap = await api("/api/bootstrap");
+  state.currentUser = state.bootstrap.current_user || user;
+  state.roles = state.bootstrap.roles || state.roles || {};
+  state.providers = state.bootstrap.providers || {};
+  state.strategy = state.bootstrap.strategy || null;
+  state.aiControl = state.bootstrap.ai_control || null;
+  hydrateSelects();
+  bindEvents();
+  renderCurrentUser();
+  applyRoleVisibility();
+  renderProviderStatus();
+  renderDiscoveryProviders();
+  renderStrategy();
+  renderAIControl();
+  applyDiscoveryDefaults();
+  await loadTeam();
+  if (canManageUsers()) await loadUsers();
+  await refreshAll();
+}
+
+function hydrateSelects() {
+  $("#filterStage").innerHTML = optionList(state.bootstrap.stages);
+  $("#filterCategory").innerHTML = optionList(state.bootstrap.categories);
+  $("#filterPriority").innerHTML = optionList(state.bootstrap.priorities);
+  $("#leadCategorySelect").innerHTML = optionList(state.bootstrap.categories, false);
+  $("#leadStageSelect").innerHTML = optionList(state.bootstrap.stages, false);
+  $("#leadPrioritySelect").innerHTML = optionList(state.bootstrap.priorities, false);
+  $("#bulkStageSelect").innerHTML = `<option value="">Fase</option>${optionList(state.bootstrap.stages, false)}`;
+  $("#bulkCategorySelect").innerHTML = `<option value="">Categoria</option>${optionList(state.bootstrap.categories, false)}`;
+  $("#bulkPrioritySelect").innerHTML = `<option value="">Priorità</option>${optionList(state.bootstrap.priorities, false)}`;
+  $("#newUserRoleSelect").innerHTML = roleOptions("member");
+  $("#finderSector").innerHTML = state.bootstrap.discovery_sectors
+    .map((sector) => `<option value="${escapeHtml(sector.key)}">${escapeHtml(sector.label)}</option>`)
+    .join("");
+}
+
+function bindEvents() {
+  if (state.eventsBound) return;
+  state.eventsBound = true;
+  $$(".nav-item").forEach((button) => {
+    button.addEventListener("click", () => switchView(button.dataset.view));
+  });
+
+  $("#logoutBtn").addEventListener("click", logout);
+  $("#refreshBtn").addEventListener("click", refreshAll);
+  $("#newLeadBtn").addEventListener("click", () => openLeadDialog());
+  $("#exportBtn").addEventListener("click", () => {
+    window.location.href = "/api/export/leads.csv";
+  });
+
+  $("#globalSearch").addEventListener("input", () => {
+    window.clearTimeout(state.searchTimer);
+    state.searchTimer = window.setTimeout(() => {
+      loadLeads();
+      if (state.trashOpen) loadTrash();
+    }, 220);
+  });
+
+  ["filterStage", "filterCategory", "filterPriority", "hotOnly"].forEach((id) => {
+    $("#" + id).addEventListener("change", loadLeads);
+  });
+
+  $("#selectAllLeads").addEventListener("change", toggleAllVisibleLeads);
+  $("#toggleTrashPanelBtn").addEventListener("click", toggleTrashPanel);
+  $("#bulkApplyBtn").addEventListener("click", applyBulkLeadUpdate);
+  $("#bulkDeleteBtn").addEventListener("click", deleteSelectedLeads);
+  $("#bulkClearBtn").addEventListener("click", clearLeadSelection);
+  $("#selectAllDeletedLeads").addEventListener("change", toggleAllDeletedLeads);
+  $("#trashBulkRestoreBtn").addEventListener("click", restoreSelectedDeletedLeads);
+  $("#trashClearBtn").addEventListener("click", clearDeletedLeadSelection);
+  $("#saveLeadBtn").addEventListener("click", saveLeadFromDialog);
+  $("#dashboardNewLeadBtn").addEventListener("click", () => openLeadDialog());
+  $("#reminderForm").addEventListener("submit", createReminderFromForm);
+  $$("[data-go-view]").forEach((button) => {
+    button.addEventListener("click", () => switchView(button.dataset.goView));
+  });
+  $("#quickLeadForm").addEventListener("submit", saveQuickLead);
+  $("#leadFinderForm").addEventListener("submit", runLeadFinder);
+  $("#batchScannerForm").addEventListener("submit", runBatchScanner);
+  $("#scanUrlForm").addEventListener("submit", scanStandaloneUrl);
+  $("#settingsForm").addEventListener("submit", saveSettings);
+  $("#strategyForm").addEventListener("submit", saveStrategy);
+  $("#aiControlForm").addEventListener("submit", saveAIControl);
+  $("#createUserForm").addEventListener("submit", createUserFromForm);
+  $("#importBtn").addEventListener("click", importCsv);
+  $("#generateMessageBtn").addEventListener("click", generateMessage);
+  $("#copyMessageBtn").addEventListener("click", copyMessage);
+  $("#mailtoBtn").addEventListener("click", openMailto);
+  $("#logMessageBtn").addEventListener("click", logGeneratedMessage);
+  $("#leadDetailDialog").addEventListener("click", (event) => {
+    if (event.target === event.currentTarget) event.currentTarget.close();
+  });
+}
+
+function switchView(view) {
+  if (view === "users" && !canManageUsers()) view = "dashboard";
+  state.view = view;
+  $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
+  $$(".view").forEach((section) => section.classList.remove("active"));
+  $("#" + view + "View").classList.add("active");
+  const titles = {
+    dashboard: ["Pipeline commerciale", "Dashboard"],
+    leads: ["Database aziendale", "Lead"],
+    discovery: ["Acquisizione", "Ricerca"],
+    map: ["Geografia commerciale", "Mappa"],
+    messages: ["Outreach", "Messaggi"],
+    settings: ["Motori esterni", "Provider"],
+    users: ["Accessi e ruoli", "Utenti"],
+  };
+  $("#viewEyebrow").textContent = titles[view][0];
+  $("#viewTitle").textContent = titles[view][1];
+  if (view === "messages") renderMessagePanel();
+  if (view === "settings") renderProviderStatus();
+  if (view === "settings") renderStrategy();
+  if (view === "settings") renderAIControl();
+  if (view === "users") loadUsers();
+  if (view === "map") renderOpportunityMap();
+  if (view === "leads" && state.trashOpen) loadTrash();
+}
+
+async function refreshAll() {
+  const keepDetailOpen = Boolean($("#leadDetailDialog")?.open);
+  await loadLeads();
+  await loadStats();
+  await loadWorkbench();
+  await loadOpportunityMap();
+  await loadReminders();
+  if (state.trashOpen) await loadTrash();
+  if (state.selectedLead) await selectLead(state.selectedLead.id, false, keepDetailOpen);
+}
+
+async function loadStats() {
+  const stats = await api("/api/stats");
+  renderStats(stats);
+}
+
+async function loadWorkbench() {
+  state.workbench = await api("/api/workbench");
+  renderWorkbench();
+}
+
+async function loadOpportunityMap() {
+  const data = await api("/api/map");
+  state.map = data.map;
+  renderOpportunityMap();
+}
+
+async function loadTeam() {
+  const data = await api("/api/team");
+  state.team = data.users || [];
+  renderReminderOptions();
+}
+
+function currentLeadQuery() {
+  const params = new URLSearchParams();
+  const search = $("#globalSearch").value.trim();
+  if (search) params.set("search", search);
+  const stage = $("#filterStage").value;
+  const category = $("#filterCategory").value;
+  const priority = $("#filterPriority").value;
+  if (stage && stage !== "Tutti") params.set("stage", stage);
+  if (category && category !== "Tutti") params.set("category", category);
+  if (priority && priority !== "Tutti") params.set("priority", priority);
+  if ($("#hotOnly").checked) params.set("min_score", "75");
+  return params.toString();
+}
+
+async function loadLeads() {
+  const query = currentLeadQuery();
+  const data = await api(`/api/leads${query ? "?" + query : ""}`);
+  state.leads = data.leads;
+  reconcileLeadSelection();
+  renderPipeline();
+  renderLeadTable();
+  renderReminderOptions();
+}
+
+function renderStats(stats) {
+  $("#statTotal").textContent = stats.total;
+  $("#statHot").textContent = stats.hot;
+  $("#statNoSite").textContent = stats.no_site;
+  $("#statDue").textContent = Number(stats.due || 0) + Number(stats.reminders_due || 0);
+  $("#statEnrich").textContent = stats.to_enrich || 0;
+  $("#pipelineCount").textContent = `${stats.total} lead`;
+}
+
+function renderWorkbench() {
+  const data = state.workbench || {};
+  const summary = data.summary || {};
+  $("#todayCount").textContent = `${(data.today || []).length} priorità`;
+  $("#hotWorkCount").textContent = String((data.hot || []).length);
+  $("#auditWorkCount").textContent = String((data.audit_ready || []).length);
+  $("#enrichWorkCount").textContent = String((data.enrich_queue || []).length);
+  $("#workbenchAvgScore").textContent = `${summary.avg_score || 0} score`;
+  $("#todayWorkList").innerHTML = renderWorkItems(data.today || [], "Nessuna priorità pronta");
+  $("#hotWorkList").innerHTML = renderWorkItems(data.hot || [], "Nessun lead caldo");
+  $("#auditWorkList").innerHTML = renderWorkItems(data.audit_ready || [], "Nessun audit pronto");
+  $("#enrichWorkList").innerHTML = renderWorkItems(data.enrich_queue || [], "Nessun lead da arricchire");
+  $("#workbenchSummary").innerHTML = `
+    <div><span>Contattabili</span><strong>${summary.contactable || 0}</strong></div>
+    <div><span>Da arricchire</span><strong>${summary.to_enrich || 0}</strong></div>
+    <div><span>Audit pronti</span><strong>${summary.audit_ready || 0}</strong></div>
+    <div><span>Senza sito</span><strong>${summary.without_website || 0}</strong></div>
+  `;
+  $$("[data-work-lead]").forEach((button) => {
+    button.addEventListener("click", () => selectLead(Number(button.dataset.workLead)));
+  });
+}
+
+function renderWorkItems(items, emptyText) {
+  if (!items.length) return `<p class="lead-meta">${escapeHtml(emptyText)}</p>`;
+  return items
+    .slice(0, 10)
+    .map(
+      (item) => `
+      <button class="work-item" data-work-lead="${item.id}">
+        <span class="work-item-top">
+          <strong>${escapeHtml(item.company_name)}</strong>
+          ${scoreChip(item.score)}
+        </span>
+        <span class="lead-meta">${escapeHtml([item.city, item.category].filter(Boolean).join(" · ") || "Lead")}</span>
+        <span>${escapeHtml(item.next_action || item.reason || "-")}</span>
+        <span class="chip-row"><span class="chip">${escapeHtml(item.priority || "Media")}</span><span class="chip info">${escapeHtml(item.budget || "")}</span></span>
+      </button>
+    `
+    )
+    .join("");
+}
+
+function renderReminderOptions() {
+  const leadSelect = $("#reminderLeadSelect");
+  const userSelect = $("#reminderUserSelect");
+  if (leadSelect) {
+    const current = leadSelect.value;
+    const options = state.leads
+      .slice(0, 300)
+      .map((lead) => `<option value="${lead.id}">${escapeHtml([lead.company_name, lead.city].filter(Boolean).join(" · "))}</option>`)
+      .join("");
+    leadSelect.innerHTML = options || '<option value="">Nessun lead disponibile</option>';
+    if (current && Array.from(leadSelect.options).some((option) => option.value === current)) {
+      leadSelect.value = current;
+    } else if (state.selectedLead && Array.from(leadSelect.options).some((option) => Number(option.value) === state.selectedLead.id)) {
+      leadSelect.value = String(state.selectedLead.id);
+    }
+  }
+  if (userSelect) {
+    const current = userSelect.value;
+    userSelect.innerHTML = state.team
+      .map((user) => `<option value="${user.id}">${escapeHtml(user.name || user.email)} · ${escapeHtml(user.role_label || user.role || "")}</option>`)
+      .join("");
+    if (current && Array.from(userSelect.options).some((option) => option.value === current)) {
+      userSelect.value = current;
+    } else if (state.currentUser?.id) {
+      userSelect.value = String(state.currentUser.id);
+    }
+  }
+}
+
+async function loadReminders() {
+  const data = await api("/api/reminders");
+  state.reminders = data.reminders || [];
+  renderReminders();
+  notifyDueReminders();
+}
+
+function reminderStatus(reminder) {
+  if (reminder.is_completed) return { label: "Fatto", tone: "ok" };
+  const due = (reminder.due_at || "").slice(0, 10);
+  if (!due) return { label: "Senza scadenza", tone: "info" };
+  const today = todayDateString();
+  if (due < today) return { label: "Scaduto", tone: "hot" };
+  if (due === today) return { label: "Oggi", tone: "mid" };
+  return { label: formatDate(due), tone: "info" };
+}
+
+function renderReminders() {
+  const list = $("#reminderList");
+  const counter = $("#reminderCount");
+  if (!list || !counter) return;
+  const pending = state.reminders.filter((item) => !item.is_completed);
+  const dueToday = pending.filter((item) => {
+    const due = (item.due_at || "").slice(0, 10);
+    return due && due <= todayDateString();
+  });
+  counter.textContent = `${pending.length} attivi · ${dueToday.length} oggi/scaduti`;
+  if (!state.reminders.length) {
+    list.innerHTML = '<p class="lead-meta">Nessun promemoria. Creane uno da un lead prioritario.</p>';
+    return;
+  }
+  list.innerHTML = state.reminders
+    .slice(0, 12)
+    .map((reminder) => {
+      const status = reminderStatus(reminder);
+      const lead = reminder.lead || {};
+      const user = reminder.assigned_user || {};
+      return `
+        <article class="reminder-item ${reminder.is_completed ? "done" : ""}">
+          <button class="reminder-check" data-reminder-complete="${reminder.id}" aria-label="Completa promemoria">
+            ${reminder.is_completed ? "&check;" : ""}
+          </button>
+          <div>
+            <div class="reminder-title-row">
+              <strong>${escapeHtml(reminder.subject || "Promemoria")}</strong>
+              <span class="chip ${status.tone}">${escapeHtml(status.label)}</span>
+            </div>
+            <p>${escapeHtml(reminder.body || "")}</p>
+            <div class="lead-meta">${escapeHtml([lead.company_name, lead.city].filter(Boolean).join(" · "))} · assegnato a ${escapeHtml(user.name || "-")}</div>
+          </div>
+          <button class="ghost mini-button" data-reminder-lead="${lead.id}" type="button">Apri</button>
+        </article>
+      `;
+    })
+    .join("");
+  $$("[data-reminder-complete]", list).forEach((button) => {
+    button.addEventListener("click", () => completeReminder(Number(button.dataset.reminderComplete)));
+  });
+  $$("[data-reminder-lead]", list).forEach((button) => {
+    button.addEventListener("click", () => selectLead(Number(button.dataset.reminderLead)));
+  });
+}
+
+function notifyDueReminders() {
+  const due = state.reminders.filter((item) => {
+    const dueDate = (item.due_at || "").slice(0, 10);
+    return !item.is_completed && dueDate && dueDate <= todayDateString() && item.assigned_user?.id === state.currentUser?.id;
+  });
+  const unseen = due.filter((item) => !state.notifiedReminderIds.has(item.id));
+  if (!unseen.length) return;
+  unseen.forEach((item) => state.notifiedReminderIds.add(item.id));
+  toast(`${unseen.length} promemoria da gestire oggi`);
+}
+
+async function createReminderFromForm(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = formPayload(form);
+  if (!payload.lead_id) return toast("Scegli un lead");
+  if (!payload.assigned_user_id) payload.assigned_user_id = state.currentUser?.id;
+  try {
+    await api("/api/reminders", { method: "POST", body: JSON.stringify(payload) });
+    const keepLead = form.elements.lead_id.value;
+    const keepUser = form.elements.assigned_user_id.value;
+    form.reset();
+    form.elements.lead_id.value = keepLead;
+    form.elements.assigned_user_id.value = keepUser;
+    await loadReminders();
+    toast("Promemoria creato");
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function completeReminder(id) {
+  await api(`/api/reminders/${id}`, { method: "PATCH", body: JSON.stringify({ completed: true }) });
+  await loadReminders();
+  if (state.selectedLead) await selectLead(state.selectedLead.id, false, false);
+  toast("Promemoria completato");
+}
+
+async function loadUsers() {
+  if (!canManageUsers()) return;
+  const data = await api("/api/users");
+  state.users = data.users || [];
+  state.roles = data.roles || state.roles;
+  renderUsers();
+}
+
+function renderUsers() {
+  $("#usersCount").textContent = `${state.users.length} utenti`;
+  if (!state.users.length) {
+    $("#usersList").innerHTML = '<p class="lead-meta">Nessun utente trovato.</p>';
+    return;
+  }
+  $("#usersList").innerHTML = state.users
+    .map((user) => `
+      <form class="user-card" data-user-id="${user.id}">
+        <div class="user-card-head">
+          <div>
+            <strong>${escapeHtml(user.name)}</strong>
+            <span>${escapeHtml(user.email)}</span>
+          </div>
+          <span class="chip ${user.is_active ? "ok" : "hot"}">${user.is_active ? "Attivo" : "Disattivato"}</span>
+        </div>
+        <div class="form-grid two">
+          <label>
+            <span>Nome</span>
+            <input name="name" value="${escapeHtml(user.name)}" required>
+          </label>
+          <label>
+            <span>Email</span>
+            <input name="email" type="email" value="${escapeHtml(user.email)}" required>
+          </label>
+          <label>
+            <span>Ruolo</span>
+            <select name="role">${roleOptions(user.role)}</select>
+          </label>
+          <label>
+            <span>Nuova password</span>
+            <input name="password" type="password" autocomplete="new-password" placeholder="Lascia vuoto per non cambiare">
+          </label>
+        </div>
+        <div class="user-card-actions">
+          <label class="check-pill">
+            <input name="is_active" type="checkbox" ${user.is_active ? "checked" : ""} ${user.id === state.currentUser?.id ? "disabled" : ""}>
+            <span>Account attivo</span>
+          </label>
+          <button class="secondary" type="submit">Salva utente</button>
+        </div>
+        <small>Ultimo accesso: ${escapeHtml(formatDate(user.last_login_at))}</small>
+      </form>
+    `)
+    .join("");
+  $$(".user-card").forEach((form) => form.addEventListener("submit", saveUserFromForm));
+}
+
+async function createUserFromForm(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  $("#userCreateStatus").textContent = "Creazione";
+  const payload = formPayload(form);
+  payload.is_active = form.elements.is_active.checked;
+  try {
+    await api("/api/users", { method: "POST", body: JSON.stringify(payload) });
+    form.reset();
+    form.elements.role.value = "member";
+    form.elements.is_active.checked = true;
+    await loadUsers();
+    $("#userCreateStatus").textContent = "Creato";
+    toast("Utente creato");
+  } catch (error) {
+    $("#userCreateStatus").textContent = "Errore";
+    toast(error.message);
+  }
+}
+
+async function saveUserFromForm(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = formPayload(form);
+  payload.is_active = form.elements.is_active.disabled ? true : form.elements.is_active.checked;
+  if (!payload.password) delete payload.password;
+  try {
+    await api(`/api/users/${form.dataset.userId}`, { method: "PATCH", body: JSON.stringify(payload) });
+    await loadUsers();
+    toast("Utente aggiornato");
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+function renderOpportunityMap() {
+  if (!$("#opportunityMap")) return;
+  const map = state.map || {};
+  const pins = map.pins || [];
+  const counts = map.counts || {};
+  $("#mapStatus").textContent = `${pins.length} pin`;
+  $("#mapMetrics").innerHTML = `
+    <div><span>Senza sito</span><strong>${counts.red || 0}</strong></div>
+    <div><span>Sito critico</span><strong>${counts.orange || 0}</strong></div>
+    <div><span>Social deboli</span><strong>${counts.yellow || 0}</strong></div>
+    <div><span>Senza coordinate</span><strong>${map.without_coordinates || 0}</strong></div>
+  `;
+  if (!pins.length || !map.bounds) {
+    $("#opportunityMap").innerHTML = `
+      <div class="map-empty">
+        <strong>Nessun lead geolocalizzato</strong>
+        <span>Aggiungi coordinate o usa la Ricerca per vedere le opportunita sulla mappa.</span>
+      </div>
+    `;
+    $("#mapLeadList").innerHTML = '<p class="lead-meta">Importa lead con coordinate per vedere la mappa.</p>';
+    return;
+  }
+  const bounds = map.bounds;
+  const lonSpan = Math.max(bounds.east - bounds.west, 0.01);
+  const latSpan = Math.max(bounds.north - bounds.south, 0.01);
+  const pinHtml = pins
+    .map((pin) => {
+      const x = 6 + ((pin.longitude - bounds.west) / lonSpan) * 88;
+      const y = 8 + (1 - (pin.latitude - bounds.south) / latSpan) * 84;
+      return `
+        <button class="map-pin ${escapeHtml(pin.tone)}" style="left:${x}%;top:${y}%;" data-map-lead="${pin.id}" title="${escapeHtml(pin.company_name)}">
+          <span>${Number(pin.score || 0)}</span>
+        </button>
+      `;
+    })
+    .join("");
+  $("#opportunityMap").innerHTML = `
+    <div class="map-grid-lines" aria-hidden="true"></div>
+    <div class="map-soft-route" aria-hidden="true"></div>
+    <div class="map-compass">N</div>
+    <div class="map-zone-label">
+      <strong>${pins.length} opportunita</strong>
+      <span>${bounds.south.toFixed(2)}, ${bounds.west.toFixed(2)} / ${bounds.north.toFixed(2)}, ${bounds.east.toFixed(2)}</span>
+    </div>
+    ${pinHtml}
+  `;
+  $("#mapLeadList").innerHTML = (map.top || [])
+    .slice(0, 10)
+    .map((pin) => `
+      <button class="work-item" data-map-lead="${pin.id}">
+        <span class="work-item-top">
+          <strong>${escapeHtml(pin.company_name)}</strong>
+          ${scoreChip(pin.score)}
+        </span>
+        <span class="lead-meta">${escapeHtml([pin.city, pin.category].filter(Boolean).join(" · ") || "Lead")}</span>
+        <span>${escapeHtml(pin.opportunity || "-")}</span>
+      </button>
+    `)
+    .join("");
+  $$("[data-map-lead]").forEach((button) => {
+    button.addEventListener("click", () => selectLead(Number(button.dataset.mapLead)));
+  });
+}
+
+function renderPipeline() {
+  const board = $("#pipelineBoard");
+  const selectedId = state.selectedLead?.id;
+  board.innerHTML = state.bootstrap.stages
+    .map((stage) => {
+      const stageLeads = state.leads.filter((lead) => lead.stage === stage);
+      const visibleLeads = stageLeads.slice(0, 12);
+      const cards = visibleLeads
+        .map(
+          (lead) => `
+          <button class="lead-card ${selectedId === lead.id ? "active" : ""}" data-lead-id="${lead.id}">
+            <span class="lead-card-top">
+              <strong>${escapeHtml(lead.company_name)}</strong>
+              ${scoreChip(lead.score)}
+            </span>
+            <span class="lead-meta">${escapeHtml([lead.city, lead.sector].filter(Boolean).join(" · ") || "-")}</span>
+            <span class="lead-site">${escapeHtml(lead.website || "Nessun sito")}</span>
+            <span class="chip-row">${categoryChip(lead.category)}<span class="chip">${escapeHtml(lead.priority || "Media")}</span></span>
+          </button>
+        `
+        )
+        .join("");
+      const overflow = stageLeads.length > visibleLeads.length ? `<div class="lead-meta">+${stageLeads.length - visibleLeads.length} altri</div>` : "";
+      return `
+        <section class="pipeline-column">
+          <header><span>${escapeHtml(stage)}</span><span>${stageLeads.length}</span></header>
+          ${cards || '<div class="lead-meta">Vuoto</div>'}
+          ${overflow}
+        </section>
+      `;
+    })
+    .join("");
+  $$("[data-lead-id]", board).forEach((button) => {
+    button.addEventListener("click", () => selectLead(Number(button.dataset.leadId)));
+  });
+}
+
+function renderLeadTable() {
+  const tbody = $("#leadTableBody");
+  if (!state.leads.length) {
+    tbody.innerHTML = `<tr><td colspan="8" class="lead-meta">Nessun lead trovato</td></tr>`;
+    renderBulkActions();
+    return;
+  }
+  tbody.innerHTML = state.leads
+    .map(
+      (lead) => `
+      <tr class="lead-row ${state.selectedLeadIds.has(lead.id) ? "selected" : ""}" data-lead-id="${lead.id}">
+        <td class="select-col">
+          <input class="lead-select-checkbox" type="checkbox" data-select-lead="${lead.id}" aria-label="Seleziona ${escapeHtml(lead.company_name)}" ${state.selectedLeadIds.has(lead.id) ? "checked" : ""}>
+        </td>
+        <td><div class="company-cell"><span class="company-avatar">${escapeHtml((lead.company_name || "?").slice(0, 1).toUpperCase())}</span><span><strong>${escapeHtml(lead.company_name)}</strong><span class="lead-meta">${escapeHtml(lead.website || "Nessun sito")}</span></span></div></td>
+        <td>${escapeHtml(lead.sector || "-")}</td>
+        <td>${escapeHtml(lead.city || "-")}</td>
+        <td>${categoryChip(lead.category)}</td>
+        <td><span class="chip">${escapeHtml(lead.stage || "Nuovo")}</span></td>
+        <td>${scoreChip(lead.score)}</td>
+        <td>${formatDate(lead.next_follow_up)}</td>
+      </tr>
+    `
+    )
+    .join("");
+  $$("[data-select-lead]", tbody).forEach((checkbox) => {
+    checkbox.addEventListener("click", (event) => event.stopPropagation());
+    checkbox.addEventListener("change", () => {
+      toggleLeadSelection(Number(checkbox.dataset.selectLead), checkbox.checked);
+    });
+  });
+  $$("[data-lead-id]", tbody).forEach((row) => {
+    row.addEventListener("click", (event) => {
+      if (event.target.closest("input, button, a, label, select")) return;
+      selectLead(Number(row.dataset.leadId));
+    });
+  });
+  renderBulkActions();
+}
+
+function selectedLeadIds() {
+  return Array.from(state.selectedLeadIds);
+}
+
+function reconcileLeadSelection() {
+  const visibleIds = new Set(state.leads.map((lead) => lead.id));
+  state.selectedLeadIds = new Set(selectedLeadIds().filter((id) => visibleIds.has(id)));
+}
+
+function toggleLeadSelection(id, selected) {
+  if (selected) state.selectedLeadIds.add(id);
+  else state.selectedLeadIds.delete(id);
+  renderLeadTable();
+}
+
+function toggleAllVisibleLeads(event) {
+  const shouldSelect = event.target.checked;
+  state.leads.forEach((lead) => {
+    if (shouldSelect) state.selectedLeadIds.add(lead.id);
+    else state.selectedLeadIds.delete(lead.id);
+  });
+  renderLeadTable();
+}
+
+function clearLeadSelection() {
+  state.selectedLeadIds.clear();
+  $("#bulkStageSelect").value = "";
+  $("#bulkCategorySelect").value = "";
+  $("#bulkPrioritySelect").value = "";
+  $("#bulkFollowUpInput").value = "";
+  renderLeadTable();
+}
+
+function renderBulkActions() {
+  const bar = $("#bulkActionBar");
+  const selectAll = $("#selectAllLeads");
+  if (!bar || !selectAll) return;
+  const ids = selectedLeadIds();
+  const visibleIds = state.leads.map((lead) => lead.id);
+  const visibleSelected = visibleIds.filter((id) => state.selectedLeadIds.has(id));
+  bar.classList.toggle("hidden", ids.length === 0);
+  $("#bulkSelectedCount").textContent = `${ids.length} ${ids.length === 1 ? "lead selezionato" : "lead selezionati"}`;
+  selectAll.disabled = visibleIds.length === 0;
+  selectAll.checked = visibleIds.length > 0 && visibleSelected.length === visibleIds.length;
+  selectAll.indeterminate = visibleSelected.length > 0 && visibleSelected.length < visibleIds.length;
+}
+
+function bulkUpdatePayload() {
+  const updates = {};
+  const stage = $("#bulkStageSelect").value;
+  const category = $("#bulkCategorySelect").value;
+  const priority = $("#bulkPrioritySelect").value;
+  const nextFollowUp = $("#bulkFollowUpInput").value;
+  if (stage) updates.stage = stage;
+  if (category) updates.category = category;
+  if (priority) updates.priority = priority;
+  if (nextFollowUp) updates.next_follow_up = nextFollowUp;
+  return updates;
+}
+
+async function applyBulkLeadUpdate() {
+  const ids = selectedLeadIds();
+  if (!ids.length) return toast("Seleziona almeno un lead");
+  const updates = bulkUpdatePayload();
+  if (!Object.keys(updates).length) return toast("Scegli una modifica da applicare");
+  const data = await api("/api/leads/bulk", {
+    method: "PATCH",
+    body: JSON.stringify({ ids, updates }),
+  });
+  toast(`${data.updated || 0} lead aggiornati`);
+  clearLeadSelection();
+  await refreshAll();
+}
+
+async function deleteSelectedLeads() {
+  const ids = selectedLeadIds();
+  if (!ids.length) return toast("Seleziona almeno un lead");
+  const ok = window.confirm(`Vuoi eliminare ${ids.length} ${ids.length === 1 ? "lead" : "lead"} selezionati?`);
+  if (!ok) return;
+  const data = await api("/api/leads/bulk-delete", {
+    method: "POST",
+    body: JSON.stringify({ ids }),
+  });
+  if (state.selectedLead && ids.includes(state.selectedLead.id)) {
+    state.selectedLead = null;
+    $("#leadDetailDialog")?.close();
+  }
+  clearLeadSelection();
+  toast(`${data.deleted || 0} lead eliminati`);
+  await refreshAll();
+}
+
+async function deleteCurrentLead() {
+  const lead = state.selectedLead;
+  if (!lead) return;
+  const ok = window.confirm(`Vuoi eliminare "${lead.company_name}" dal CRM?`);
+  if (!ok) return;
+  await api(`/api/leads/${lead.id}`, { method: "DELETE" });
+  state.selectedLeadIds.delete(lead.id);
+  state.selectedLead = null;
+  $("#leadDetailDialog")?.close();
+  toast("Lead eliminato");
+  await refreshAll();
+}
+
+async function toggleTrashPanel() {
+  state.trashOpen = !state.trashOpen;
+  const panel = $("#trashPanel");
+  const button = $("#toggleTrashPanelBtn");
+  panel.classList.toggle("hidden", !state.trashOpen);
+  button.classList.toggle("active", state.trashOpen);
+  const label = button.querySelector("span");
+  if (label) label.textContent = state.trashOpen ? "Chiudi cestino" : "Cestino lead";
+  if (state.trashOpen) await loadTrash();
+}
+
+async function loadTrash() {
+  const search = $("#globalSearch").value.trim();
+  const query = search ? `?${new URLSearchParams({ search }).toString()}` : "";
+  const data = await api(`/api/leads/trash${query}`);
+  state.deletedLeads = data.leads || [];
+  reconcileDeletedLeadSelection();
+  renderTrashTable();
+}
+
+function renderTrashTable() {
+  const tbody = $("#trashTableBody");
+  if (!tbody) return;
+  $("#trashCount").textContent = `${state.deletedLeads.length} eliminati`;
+  const inlineCount = $("#trashInlineCount");
+  if (inlineCount) inlineCount.textContent = String(state.deletedLeads.length);
+  if (!state.deletedLeads.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="lead-meta">Cestino vuoto</td></tr>`;
+    renderTrashBulkActions();
+    return;
+  }
+  tbody.innerHTML = state.deletedLeads
+    .map(
+      (lead) => `
+      <tr class="lead-row ${state.selectedDeletedLeadIds.has(lead.id) ? "selected" : ""}" data-deleted-lead-id="${lead.id}">
+        <td class="select-col">
+          <input class="lead-select-checkbox" type="checkbox" data-select-deleted-lead="${lead.id}" aria-label="Seleziona ${escapeHtml(lead.company_name)}" ${state.selectedDeletedLeadIds.has(lead.id) ? "checked" : ""}>
+        </td>
+        <td><div class="company-cell"><span class="company-avatar">${escapeHtml((lead.company_name || "?").slice(0, 1).toUpperCase())}</span><span><strong>${escapeHtml(lead.company_name)}</strong><span class="lead-meta">${escapeHtml(lead.website || "Nessun sito")}</span></span></div></td>
+        <td>${escapeHtml(lead.sector || "-")}</td>
+        <td>${escapeHtml(lead.city || "-")}</td>
+        <td>${categoryChip(lead.category)}</td>
+        <td>${formatDate(lead.deleted_at)}</td>
+        <td><button class="secondary mini-button" data-restore-lead="${lead.id}" type="button">Ripristina</button></td>
+      </tr>
+    `
+    )
+    .join("");
+  $$("[data-select-deleted-lead]", tbody).forEach((checkbox) => {
+    checkbox.addEventListener("click", (event) => event.stopPropagation());
+    checkbox.addEventListener("change", () => {
+      toggleDeletedLeadSelection(Number(checkbox.dataset.selectDeletedLead), checkbox.checked);
+    });
+  });
+  $$("[data-restore-lead]", tbody).forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      restoreDeletedLeads([Number(button.dataset.restoreLead)]);
+    });
+  });
+  renderTrashBulkActions();
+}
+
+function selectedDeletedLeadIds() {
+  return Array.from(state.selectedDeletedLeadIds);
+}
+
+function reconcileDeletedLeadSelection() {
+  const visibleIds = new Set(state.deletedLeads.map((lead) => lead.id));
+  state.selectedDeletedLeadIds = new Set(selectedDeletedLeadIds().filter((id) => visibleIds.has(id)));
+}
+
+function toggleDeletedLeadSelection(id, selected) {
+  if (selected) state.selectedDeletedLeadIds.add(id);
+  else state.selectedDeletedLeadIds.delete(id);
+  renderTrashTable();
+}
+
+function toggleAllDeletedLeads(event) {
+  const shouldSelect = event.target.checked;
+  state.deletedLeads.forEach((lead) => {
+    if (shouldSelect) state.selectedDeletedLeadIds.add(lead.id);
+    else state.selectedDeletedLeadIds.delete(lead.id);
+  });
+  renderTrashTable();
+}
+
+function clearDeletedLeadSelection() {
+  state.selectedDeletedLeadIds.clear();
+  renderTrashTable();
+}
+
+function renderTrashBulkActions() {
+  const bar = $("#trashBulkActionBar");
+  const selectAll = $("#selectAllDeletedLeads");
+  if (!bar || !selectAll) return;
+  const ids = selectedDeletedLeadIds();
+  const visibleIds = state.deletedLeads.map((lead) => lead.id);
+  const visibleSelected = visibleIds.filter((id) => state.selectedDeletedLeadIds.has(id));
+  bar.classList.toggle("hidden", ids.length === 0);
+  $("#trashSelectedCount").textContent = `${ids.length} ${ids.length === 1 ? "lead selezionato" : "lead selezionati"}`;
+  selectAll.disabled = visibleIds.length === 0;
+  selectAll.checked = visibleIds.length > 0 && visibleSelected.length === visibleIds.length;
+  selectAll.indeterminate = visibleSelected.length > 0 && visibleSelected.length < visibleIds.length;
+}
+
+async function restoreSelectedDeletedLeads() {
+  const ids = selectedDeletedLeadIds();
+  if (!ids.length) return toast("Seleziona almeno un lead da ripristinare");
+  await restoreDeletedLeads(ids);
+}
+
+async function restoreDeletedLeads(ids) {
+  const data = await api("/api/leads/bulk-restore", {
+    method: "POST",
+    body: JSON.stringify({ ids }),
+  });
+  state.selectedDeletedLeadIds = new Set(selectedDeletedLeadIds().filter((id) => !ids.includes(id)));
+  toast(`${data.restored || 0} lead ripristinati`);
+  await refreshAll();
+}
+
+async function selectLead(id, showToast = true, openDetail = true) {
+  const data = await api(`/api/leads/${id}`);
+  state.selectedLead = data.lead;
+  renderDetail(openDetail);
+  renderPipeline();
+  renderMessagePanel();
+  renderReminderOptions();
+  if (showToast) toast("Lead aperto");
+}
+
+function renderDetail(openDialog = true) {
+  const lead = state.selectedLead;
+  if (!lead) return;
+  const dialog = $("#leadDetailDialog");
+  const pane = $("#leadDetailContent");
+  const website = lead.website ? `<a href="${escapeHtml(externalHref(lead.website))}" target="_blank" rel="noreferrer">${escapeHtml(lead.website)}</a>` : "Nessun sito";
+  const scans = lead.scans || [];
+  const lastScan = scans[0];
+  const assistant = lead.assistant || {};
+  const research = lead.research || null;
+  pane.innerHTML = `
+    <header class="detail-modal-header">
+      <div class="lead-modal-title">
+        <span class="company-avatar large">${escapeHtml((lead.company_name || "?").slice(0, 1).toUpperCase())}</span>
+        <div>
+          <span class="detail-kicker">Lead #${lead.id}</span>
+          <h2>${escapeHtml(lead.company_name)}</h2>
+          <div class="lead-meta">${escapeHtml([lead.city, lead.sector].filter(Boolean).join(" · ") || "Lead")}</div>
+        </div>
+      </div>
+      <div class="detail-modal-top-actions">
+        ${scoreChip(lead.score)}
+        <button class="ghost icon-button" id="closeLeadDetailBtn" type="button" aria-label="Chiudi">
+          <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="lead-modal-strip">
+      <div class="chip-row">
+        ${categoryChip(lead.category)}
+        <span class="chip">${escapeHtml(lead.stage)}</span>
+        <span class="chip">${escapeHtml(lead.priority)}</span>
+      </div>
+      <div class="detail-actions">
+        <button class="secondary" id="editLeadBtn"><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"/></svg><span>Modifica</span></button>
+        <button class="primary" id="scanLeadBtn"><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z"/><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75zM6.75 16.5h.75v.75h-.75V16.5zM16.5 6.75h.75v.75h-.75v-.75z"/></svg><span>Scansiona</span></button>
+        <button class="secondary" id="aiScoreLeadBtn"><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z"/></svg><span>AI score</span></button>
+        <button class="secondary" id="researchLeadBtn"><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6l4 2m5-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><span>Research</span></button>
+        <button class="secondary" id="messageLeadBtn"><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"/></svg><span>Messaggio</span></button>
+        <button class="danger" id="deleteLeadBtn"><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166M19.228 5.79L18.16 19.673A2.25 2.25 0 0115.916 21H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .397c.34-.059.68-.114 1.022-.166m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916A2.25 2.25 0 0013.5 2.25h-3A2.25 2.25 0 008.25 4.5v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg><span>Elimina</span></button>
+      </div>
+    </div>
+
+    <div class="lead-modal-body">
+      <div class="lead-modal-main">
+        <section class="detail-section">
+          <div class="section-heading compact"><h3>Opportunita</h3></div>
+          <p>${escapeHtml(lead.opportunity || "Da qualificare")}</p>
+          <p class="lead-meta">${escapeHtml(lead.pain_points || "")}</p>
+        </section>
+
+        <section class="detail-section audit-section">
+          <div class="section-heading compact">
+            <h3>Audit vendibile</h3>
+            <button class="secondary mini-button" id="copyAuditBtn" type="button">Copia audit</button>
+          </div>
+          <div class="audit-list">${renderAuditPoints(assistant.audit_points)}</div>
+        </section>
+
+        <section class="detail-section research-section">
+          <div class="section-heading compact">
+            <h3>AI Lead Researcher</h3>
+            <span>${escapeHtml(research?.generated_by || "non generato")}</span>
+          </div>
+          ${renderResearch(research)}
+        </section>
+
+        <section class="detail-section">
+          <div class="section-heading compact"><h3>Contatti</h3></div>
+          <form class="mini-form inline" id="contactForm">
+            <select name="type">${state.bootstrap.contact_types.map((type) => `<option value="${type}">${type}</option>`).join("")}</select>
+            <input name="value" placeholder="email, telefono, profilo social" required>
+            <button class="secondary" type="submit"><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg><span>Aggiungi</span></button>
+          </form>
+          <div class="list-stack">${renderContacts(lead.contacts)}</div>
+        </section>
+
+        <section class="detail-section">
+          <div class="section-heading compact"><h3>Ultima scansione</h3></div>
+          ${lastScan ? renderScan(lastScan) : '<p class="lead-meta">Nessuna scansione</p>'}
+        </section>
+      </div>
+
+      <aside class="lead-modal-side">
+        <section class="detail-section assistant-card">
+          <div class="section-heading compact"><h3>Assistente vendita</h3></div>
+          <div class="sales-score">
+            <strong>${assistant.local_score || lead.score || 0}</strong>
+            <span>${escapeHtml(assistant.why_interesting || "Da qualificare")}</span>
+          </div>
+          <div class="result-line"><span>Budget stimato</span><strong>${escapeHtml(assistant.estimated_budget || "-")}</strong></div>
+          <div class="next-action-list">${renderNextActions(assistant.next_actions)}</div>
+        </section>
+
+        <section class="detail-section">
+          <div class="section-heading compact"><h3>Pacchetti</h3></div>
+          <div class="package-grid">${renderPackages(assistant.packages)}</div>
+        </section>
+
+        <section class="detail-section">
+          <div class="section-heading compact"><h3>Sicurezza passiva</h3></div>
+          <div class="security-list">${renderSecurityPoints(assistant.passive_security)}</div>
+        </section>
+
+        <section class="detail-section">
+          <div class="kv-grid">
+            <div class="kv"><span>Sito</span><strong>${website}</strong></div>
+            <div class="kv"><span>Fonte</span><strong>${escapeHtml(lead.source || "-")}</strong></div>
+            <div class="kv"><span>Follow-up</span><strong>${formatDate(lead.next_follow_up)}</strong></div>
+            <div class="kv"><span>Ultimo contatto</span><strong>${formatDate(lead.last_contacted_at)}</strong></div>
+          </div>
+        </section>
+
+        <section class="detail-section">
+          <div class="section-heading compact"><h3>Attivita</h3></div>
+          <form class="mini-form" id="activityForm">
+            <input name="subject" placeholder="Titolo nota">
+            <textarea name="body" rows="3" placeholder="Nota"></textarea>
+            <button class="secondary" type="submit"><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg><span>Salva nota</span></button>
+          </form>
+          <div class="list-stack">${renderActivities(lead.activities)}</div>
+        </section>
+      </aside>
+    </div>
+  `;
+
+  $("#closeLeadDetailBtn").addEventListener("click", () => dialog.close());
+  $("#copyAuditBtn").addEventListener("click", copyLeadAudit);
+  $("#editLeadBtn").addEventListener("click", () => {
+    dialog.close();
+    openLeadDialog(lead);
+  });
+  $("#scanLeadBtn").addEventListener("click", scanSelectedLead);
+  $("#aiScoreLeadBtn").addEventListener("click", scoreSelectedLeadAI);
+  $("#researchLeadBtn").addEventListener("click", researchSelectedLead);
+  $("#messageLeadBtn").addEventListener("click", () => {
+    dialog.close();
+    switchView("messages");
+  });
+  $("#deleteLeadBtn").addEventListener("click", deleteCurrentLead);
+  $("#contactForm").addEventListener("submit", addContact);
+  $("#activityForm").addEventListener("submit", addActivity);
+  if (openDialog && !dialog.open) dialog.showModal();
+}
+
+function renderAuditPoints(points = []) {
+  if (!points.length) return '<p class="lead-meta">Audit da completare</p>';
+  return points.map((point) => `<div class="audit-point"><span></span><p>${escapeHtml(point)}</p></div>`).join("");
+}
+
+function renderMiniList(items = []) {
+  if (!items.length) return '<p class="lead-meta">Da completare</p>';
+  return `<ul class="mini-list">${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+}
+
+function renderObjections(items = []) {
+  if (!items.length) return '<p class="lead-meta">Nessuna obiezione generata</p>';
+  return items
+    .map((item) => `
+      <div class="objection-item">
+        <strong>${escapeHtml(item.objection || "")}</strong>
+        <p>${escapeHtml(item.answer || "")}</p>
+      </div>
+    `)
+    .join("");
+}
+
+function renderResearch(research) {
+  if (!research) {
+    return '<p class="lead-meta">Nessuna ricerca generata</p>';
+  }
+  return `
+    <div class="research-grid">
+      <div class="research-main">
+        <p>${escapeHtml(research.business_summary || "")}</p>
+        <div class="research-callout">
+          <span>Problema</span>
+          <strong>${escapeHtml(research.primary_problem || "-")}</strong>
+        </div>
+        <div class="research-callout">
+          <span>Offerta</span>
+          <strong>${escapeHtml(research.recommended_offer || "-")}</strong>
+        </div>
+        <div class="research-message">${escapeHtml(research.opening_message || "")}</div>
+      </div>
+      <div class="research-side">
+        <div class="result-line"><span>Pacchetto</span><strong>${escapeHtml(research.package_recommendation || "-")}</strong></div>
+        <div class="result-line"><span>Prezzo</span><strong>${escapeHtml(research.price_recommendation || "-")}</strong></div>
+        <div class="result-line"><span>Canale</span><strong>${escapeHtml(research.best_channel || "-")}</strong></div>
+        <div class="result-line"><span>Confidence</span><strong>${Number(research.confidence || 0)}%</strong></div>
+      </div>
+    </div>
+    <div class="research-columns">
+      <div><span class="field-label">Fatti certi</span>${renderMiniList(research.known_facts || [])}</div>
+      <div><span class="field-label">Segnali</span>${renderMiniList(research.inferred_signals || [])}</div>
+      <div><span class="field-label">Da verificare</span>${renderMiniList(research.to_verify || [])}</div>
+    </div>
+    <div class="research-columns two">
+      <div><span class="field-label">Obiezioni</span><div class="objection-list">${renderObjections(research.objections || [])}</div></div>
+      <div><span class="field-label">Prossimi passi</span>${renderMiniList(research.next_steps || [])}</div>
+    </div>
+    ${research.warning ? `<p class="lead-meta">${escapeHtml(research.warning)}</p>` : ""}
+  `;
+}
+
+function renderPackages(packages = []) {
+  if (!packages.length) return '<p class="lead-meta">Nessun pacchetto suggerito</p>';
+  return packages
+    .map(
+      (pkg) => `
+      <div class="package-item">
+        <strong>${escapeHtml(pkg.label)}</strong>
+        <span>${escapeHtml(pkg.reason)}</span>
+      </div>
+    `
+    )
+    .join("");
+}
+
+function renderSecurityPoints(points = []) {
+  if (!points.length) return '<p class="lead-meta">Nessun controllo disponibile</p>';
+  return points
+    .map(
+      (point) => `
+      <div class="security-point ${escapeHtml(point.status || "todo")}">
+        <span></span>
+        <p>${escapeHtml(point.label || "")}</p>
+      </div>
+    `
+    )
+    .join("");
+}
+
+function renderNextActions(actions = []) {
+  if (!actions.length) return '<p class="lead-meta">Nessuna azione suggerita</p>';
+  return actions.map((action) => `<div><span></span><p>${escapeHtml(action)}</p></div>`).join("");
+}
+
+async function copyLeadAudit() {
+  if (!state.selectedLead) return;
+  const assistant = state.selectedLead.assistant || {};
+  const lines = [
+    `Audit ${state.selectedLead.company_name}`,
+    "",
+    ...(assistant.audit_points || []).map((point) => `- ${point}`),
+    "",
+    `Proposta: ${assistant.sales_angle || state.selectedLead.opportunity || ""}`,
+    `Pacchetti: ${(assistant.packages || []).map((pkg) => pkg.label).join(", ")}`,
+  ];
+  await navigator.clipboard.writeText(lines.join("\n").trim());
+  toast("Audit copiato");
+}
+
+function renderContacts(contacts = []) {
+  if (!contacts.length) return '<p class="lead-meta">Nessun contatto salvato</p>';
+  return contacts
+    .map(
+      (contact) => `
+      <div class="list-item">
+        <span class="list-label">${escapeHtml(contact.type)}</span>
+        <strong>${escapeHtml(contact.value)}</strong>
+        <span>${escapeHtml(contact.consent_status || "Da verificare")}</span>
+      </div>
+    `
+    )
+    .join("");
+}
+
+function renderActivities(activities = []) {
+  if (!activities.length) return '<p class="lead-meta">Nessuna attivita</p>';
+  return activities
+    .slice(0, 8)
+    .map((activity) => {
+      const isReminder = activity.kind === "reminder";
+      const status = isReminder
+        ? reminderStatus({ is_completed: Boolean(activity.completed_at), due_at: activity.due_at })
+        : { label: activity.kind || "nota", tone: "info" };
+      return `
+      <div class="list-item ${isReminder ? "reminder-activity" : ""}">
+        <span class="list-label">${escapeHtml(isReminder ? "Promemoria" : activity.kind || "Nota")}</span>
+        <strong>${escapeHtml(activity.subject || activity.kind)}</strong>
+        <p>${escapeHtml(activity.body || "")}</p>
+        <span>${formatDate(activity.created_at)}${isReminder ? ` · ${escapeHtml(status.label)} · ${escapeHtml(activity.assigned_user_name || "Non assegnato")}` : ""}</span>
+      </div>
+    `;
+    })
+    .join("");
+}
+
+function renderScan(scan) {
+  return `
+    <div class="scan-result">
+      <div class="result-line"><span>Categoria</span><strong>${escapeHtml(scan.category_suggestion || "-")}</strong></div>
+      <div class="result-line"><span>Score</span><strong>${scan.score}</strong></div>
+      <div class="result-line"><span>HTTPS</span><strong>${scan.has_https ? "Si" : "No"}</strong></div>
+      <div class="result-line"><span>Mobile</span><strong>${scan.has_viewport ? "Si" : "No"}</strong></div>
+      <div class="result-line"><span>Tempo</span><strong>${scan.load_time_ms ? scan.load_time_ms + " ms" : "-"}</strong></div>
+      <div class="result-line"><span>Tecnologie</span><strong>${escapeHtml((scan.tech_stack || []).join(", ") || "-")}</strong></div>
+      <div class="result-line"><span>Problemi</span><strong>${escapeHtml((scan.issues || []).join(", ") || "-")}</strong></div>
+    </div>
+  `;
+}
+
+function openLeadDialog(lead = null) {
+  const dialog = $("#leadDialog");
+  const form = $("#leadForm");
+  form.reset();
+  $("#leadDialogTitle").textContent = lead ? "Modifica lead" : "Nuovo lead";
+  form.elements.id.value = lead?.id || "";
+  form.elements.company_name.value = lead?.company_name || "";
+  form.elements.sector.value = lead?.sector || "";
+  form.elements.city.value = lead?.city || "";
+  form.elements.address.value = lead?.address || "";
+  form.elements.website.value = lead?.website || "";
+  form.elements.source.value = lead?.source || "";
+  form.elements.category.value = lead?.category || "Da qualificare";
+  form.elements.stage.value = lead?.stage || "Nuovo";
+  form.elements.priority.value = lead?.priority || "Media";
+  form.elements.next_follow_up.value = lead?.next_follow_up ? lead.next_follow_up.slice(0, 10) : "";
+  form.elements.notes.value = lead?.notes || "";
+  dialog.showModal();
+}
+
+function formPayload(form) {
+  return Object.fromEntries(new FormData(form).entries());
+}
+
+async function saveLeadFromDialog() {
+  const form = $("#leadForm");
+  if (!form.reportValidity()) return;
+  const payload = formPayload(form);
+  const id = payload.id;
+  delete payload.id;
+  if (id) {
+    await api(`/api/leads/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+    toast("Lead aggiornato");
+  } else {
+    const data = await api("/api/leads", { method: "POST", body: JSON.stringify(payload) });
+    state.selectedLead = data.lead;
+    toast("Lead creato");
+  }
+  $("#leadDialog").close();
+  await refreshAll();
+}
+
+async function saveQuickLead(event) {
+  event.preventDefault();
+  const payload = formPayload(event.currentTarget);
+  const data = await api("/api/leads", { method: "POST", body: JSON.stringify(payload) });
+  event.currentTarget.reset();
+  await refreshAll();
+  await selectLead(data.lead.id, false);
+  toast("Lead salvato");
+}
+
+async function runLeadFinder(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = {
+    city: form.elements.city.value.trim(),
+    sector: form.elements.sector.value,
+    provider: form.elements.provider.value,
+    limit: Number(form.elements.limit.value || 25),
+    only_without_website: form.elements.only_without_website.checked,
+    require_contact: form.elements.require_contact.checked,
+    save: form.elements.save.checked,
+  };
+  if (!payload.city) {
+    toast("Inserisci una zona");
+    return;
+  }
+  if (payload.provider === "google" && !googleDiscoveryReady()) {
+    toast("Google Maps e spento: uso OpenStreetMap gratis");
+    payload.provider = "osm";
+    form.elements.provider.value = "osm";
+  }
+  $("#finderStatus").textContent = "Ricerca in corso";
+  $("#finderResults").innerHTML = '<div class="lead-meta">Sto cercando attivita locali</div>';
+  $("#finderMap").innerHTML = '<div class="finder-map-empty">Ricerca in corso</div>';
+  try {
+    const endpoint = payload.provider === "google" ? "/api/discovery/google" : "/api/discovery/osm";
+    const data = await api(endpoint, { method: "POST", body: JSON.stringify(payload) });
+    state.discoveryResults = data.candidates || [];
+    renderFinderResults(data);
+    if (payload.save) await refreshAll();
+    toast(payload.save ? `${data.imported.length} lead salvati` : `${data.count} lead trovati`);
+  } catch (error) {
+    $("#finderStatus").textContent = "Errore";
+    $("#finderResults").innerHTML = `<div class="lead-meta">${escapeHtml(error.message)}</div>`;
+    $("#finderMap").innerHTML = '<div class="finder-map-empty">Mappa non disponibile</div>';
+    toast(error.message);
+  }
+}
+
+function renderFinderResults(data) {
+  $("#finderStatus").textContent = `${data.count} trovati`;
+  const candidates = data.candidates || [];
+  renderFinderMap(candidates, data);
+  if (!candidates.length) {
+    $("#finderResults").innerHTML = `
+      <div class="lead-meta">
+        Nessun candidato trovato con questi filtri.
+        ${Number(data.skipped_no_contact || 0) ? `${data.skipped_no_contact} esclusi per mancanza contatti.` : ""}
+      </div>
+    `;
+    return;
+  }
+  const summary = `
+    <div class="result-line">
+      <span>${escapeHtml([data.area, data.provider === "google_places" ? "Google Places" : "OpenStreetMap"].filter(Boolean).join(" · "))}</span>
+      <strong>${(data.imported || []).length} salvati · ${data.duplicates || 0} duplicati · ${data.skipped_no_contact || 0} senza contatto · ${data.skipped_with_website || 0} con sito esclusi</strong>
+    </div>
+  `;
+  const cards = candidates
+    .map((candidate) => {
+      const leadId = candidate.imported_id || candidate.existing_id;
+      const status = candidate.imported_id ? "Salvato" : candidate.existing_id ? "Gia presente" : "Anteprima";
+      const statusTone = candidate.imported_id ? "ok" : candidate.existing_id ? "info" : "mid";
+      const siteText = candidate.website ? candidate.website : "Senza sito";
+      const contactText = candidate.contact_summary || "Nessun contatto";
+      return `
+        <article class="candidate-card">
+          <div>
+            <strong>${escapeHtml(candidate.company_name)}</strong>
+            <div class="lead-meta">${escapeHtml([candidate.city, candidate.sector].filter(Boolean).join(" · "))}</div>
+            <div class="lead-meta">${escapeHtml(candidate.address || "")}</div>
+          </div>
+          <div>
+            <div class="chip-row">${scoreChip(candidate.score)}${categoryChip(candidate.category)}<span class="chip ${statusTone}">${status}</span></div>
+            <div class="lead-meta">${escapeHtml(siteText)}</div>
+            <div class="lead-meta">${escapeHtml(contactText)}</div>
+          </div>
+          <div class="candidate-actions">
+            ${leadId ? `<button class="secondary" data-open-lead="${leadId}"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg><span>Apri</span></button>` : ""}
+            <a class="secondary" href="${escapeHtml(candidate.source_url)}" target="_blank" rel="noreferrer"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg><span>Fonte</span></a>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+  $("#finderResults").innerHTML = summary + cards;
+  $$("[data-open-lead]", $("#finderResults")).forEach((button) => {
+    button.addEventListener("click", () => selectLead(Number(button.dataset.openLead)));
+  });
+}
+
+function renderFinderMap(candidates = [], data = {}) {
+  const mapEl = $("#finderMap");
+  if (!mapEl) return;
+  const pins = candidates
+    .filter((candidate) => candidate.latitude !== null && candidate.latitude !== undefined && candidate.longitude !== null && candidate.longitude !== undefined)
+    .map((candidate) => ({
+      ...candidate,
+      latitude: Number(candidate.latitude),
+      longitude: Number(candidate.longitude),
+    }))
+    .filter((candidate) => Number.isFinite(candidate.latitude) && Number.isFinite(candidate.longitude));
+  if (!candidates.length) {
+    mapEl.innerHTML = '<div class="finder-map-empty">I risultati compariranno qui</div>';
+    return;
+  }
+  if (!pins.length) {
+    mapEl.innerHTML = `
+      <div class="finder-map-empty">
+        <strong>${candidates.length} lead trovati</strong>
+        <span>Nessuna coordinata disponibile per questa ricerca.</span>
+      </div>
+    `;
+    return;
+  }
+  const bounds = pins.reduce(
+    (acc, pin) => ({
+      north: Math.max(acc.north, pin.latitude),
+      south: Math.min(acc.south, pin.latitude),
+      east: Math.max(acc.east, pin.longitude),
+      west: Math.min(acc.west, pin.longitude),
+    }),
+    { north: -90, south: 90, east: -180, west: 180 }
+  );
+  const lonSpan = Math.max(bounds.east - bounds.west, 0.01);
+  const latSpan = Math.max(bounds.north - bounds.south, 0.01);
+  const pinHtml = pins
+    .slice(0, 80)
+    .map((pin) => {
+      const x = 8 + ((pin.longitude - bounds.west) / lonSpan) * 84;
+      const y = 9 + (1 - (pin.latitude - bounds.south) / latSpan) * 82;
+      const leadId = pin.imported_id || pin.existing_id || "";
+      const tone = pin.category === "Nessun sito" ? "red" : pin.score >= 75 ? "orange" : "yellow";
+      return `
+        <button class="finder-map-pin ${tone}" style="left:${x}%;top:${y}%;" ${leadId ? `data-open-lead="${leadId}"` : ""} title="${escapeHtml(pin.company_name)}">
+          <span>${escapeHtml((pin.company_name || "?").slice(0, 1).toUpperCase())}</span>
+        </button>
+      `;
+    })
+    .join("");
+  mapEl.innerHTML = `
+    <div class="map-grid-lines" aria-hidden="true"></div>
+    <div class="finder-map-badge">
+      <strong>${pins.length}</strong>
+      <span>${escapeHtml(data.area || "zona")} · ${escapeHtml(data.provider === "google_places" ? "Google Places" : "OpenStreetMap")}</span>
+    </div>
+    ${pinHtml}
+  `;
+  $$("[data-open-lead]", mapEl).forEach((button) => {
+    button.addEventListener("click", () => selectLead(Number(button.dataset.openLead)));
+  });
+}
+
+async function runBatchScanner(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = {
+    provider: form.elements.provider.value,
+    zones: strategyValues(form.elements.zones.value),
+    per_query_limit: Number(form.elements.per_query_limit.value || 6),
+    max_queries: Number(form.elements.max_queries.value || 12),
+    only_without_website: form.elements.only_without_website.checked,
+    require_contact: form.elements.require_contact.checked,
+    save: form.elements.save.checked,
+  };
+  if (!payload.zones.length) {
+    toast("Inserisci almeno una zona");
+    return;
+  }
+  if (payload.provider === "google" && !googleDiscoveryReady()) {
+    toast("Google Maps e spento: batch in modalita gratis");
+    payload.provider = "osm";
+    form.elements.provider.value = "osm";
+  }
+  $("#batchScannerStatus").textContent = "Batch in corso";
+  $("#batchScannerResults").innerHTML = '<div class="lead-meta">Scanner batch avviato</div>';
+  try {
+    const data = await api("/api/discovery/batch", { method: "POST", body: JSON.stringify(payload) });
+    renderBatchResults(data);
+    if (payload.save) await refreshAll();
+    toast(`${data.imported.length} lead salvati dal batch`);
+  } catch (error) {
+    $("#batchScannerStatus").textContent = "Errore";
+    $("#batchScannerResults").innerHTML = `<div class="lead-meta">${escapeHtml(error.message)}</div>`;
+    toast(error.message);
+  }
+}
+
+function renderBatchResults(data) {
+  $("#batchScannerStatus").textContent = `${data.queries || 0} ricerche`;
+  const resultRows = (data.results || [])
+    .map((item) => `
+      <div class="result-line">
+        <span>${escapeHtml([item.city, item.sector].join(" · "))}</span>
+        <strong>${item.imported || 0} salvati · ${item.duplicates || 0} duplicati · ${item.count || 0} trovati</strong>
+      </div>
+    `)
+    .join("");
+  const errorRows = (data.errors || [])
+    .map((item) => `
+      <div class="result-line danger">
+        <span>${escapeHtml([item.city, item.sector].join(" · "))}</span>
+        <strong>${escapeHtml(item.error)}</strong>
+      </div>
+    `)
+    .join("");
+  const candidateCards = (data.candidates || [])
+    .slice(0, 12)
+    .map((candidate) => {
+      const leadId = candidate.imported_id || candidate.existing_id;
+      return `
+        <article class="candidate-card compact-candidate">
+          <div>
+            <strong>${escapeHtml(candidate.company_name)}</strong>
+            <div class="lead-meta">${escapeHtml([candidate.city, candidate.sector].filter(Boolean).join(" · "))}</div>
+          </div>
+          <div class="chip-row">${scoreChip(candidate.score)}${categoryChip(candidate.category)}</div>
+          <div class="candidate-actions">
+            ${leadId ? `<button class="secondary" data-open-lead="${leadId}">Apri</button>` : ""}
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+  $("#batchScannerResults").innerHTML = `
+    <div class="result-line">
+      <span>${escapeHtml(data.provider === "google_places" ? "Google Places" : "OpenStreetMap")}</span>
+      <strong>${(data.imported || []).length} salvati · ${data.duplicates || 0} duplicati · ${data.skipped_no_contact || 0} senza contatto</strong>
+    </div>
+    ${resultRows || '<div class="lead-meta">Nessun risultato per combinazione.</div>'}
+    ${errorRows}
+    ${candidateCards}
+  `;
+  $$("[data-open-lead]", $("#batchScannerResults")).forEach((button) => {
+    button.addEventListener("click", () => selectLead(Number(button.dataset.openLead)));
+  });
+}
+
+async function scanSelectedLead() {
+  if (!state.selectedLead) return;
+  toast("Scansione avviata");
+  const data = await api(`/api/leads/${state.selectedLead.id}/scan`, { method: "POST", body: JSON.stringify({}) });
+  state.selectedLead = data.lead;
+  renderDetail();
+  await refreshAll();
+  toast("Scansione completata");
+}
+
+async function scoreSelectedLeadAI() {
+  if (!state.selectedLead) return;
+  toast("Analisi AI avviata");
+  try {
+    const data = await api(`/api/leads/${state.selectedLead.id}/ai-score`, { method: "POST", body: JSON.stringify({}) });
+    state.selectedLead = data.lead;
+    renderDetail();
+    await refreshAll();
+    toast("AI score aggiornato");
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function researchSelectedLead() {
+  if (!state.selectedLead) return;
+  toast("Research avviata");
+  try {
+    const data = await api(`/api/leads/${state.selectedLead.id}/research`, {
+      method: "POST",
+      body: JSON.stringify({ ai: true }),
+    });
+    state.selectedLead = data.lead;
+    renderDetail();
+    await refreshAll();
+    toast(data.warning || "Research aggiornata");
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function scanStandaloneUrl(event) {
+  event.preventDefault();
+  const payload = formPayload(event.currentTarget);
+  $("#standaloneScanResult").innerHTML = '<div class="lead-meta">Scansione in corso</div>';
+  const data = await api("/api/scan-url", { method: "POST", body: JSON.stringify(payload) });
+  $("#standaloneScanResult").innerHTML = renderScan(data.scan);
+}
+
+async function addContact(event) {
+  event.preventDefault();
+  if (!state.selectedLead) return;
+  const payload = formPayload(event.currentTarget);
+  await api(`/api/leads/${state.selectedLead.id}/contacts`, { method: "POST", body: JSON.stringify(payload) });
+  await selectLead(state.selectedLead.id, false);
+  toast("Contatto aggiunto");
+}
+
+async function addActivity(event) {
+  event.preventDefault();
+  if (!state.selectedLead) return;
+  const payload = { ...formPayload(event.currentTarget), kind: "note" };
+  await api(`/api/leads/${state.selectedLead.id}/activities`, { method: "POST", body: JSON.stringify(payload) });
+  await selectLead(state.selectedLead.id, false);
+  toast("Nota salvata");
+}
+
+function renderMessagePanel() {
+  const lead = state.selectedLead;
+  $("#messageEmpty").classList.toggle("hidden", Boolean(lead));
+  $("#messagePanel").classList.toggle("hidden", !lead);
+  if (!lead) return;
+  $("#messageLeadName").textContent = lead.company_name;
+}
+
+function renderProviderStatus() {
+  const settings = state.providers || {};
+  const googleHasKey = Boolean(settings.google_places_configured);
+  const googleEnabled = Boolean(settings.google_places_enabled);
+  const googleReady = Boolean(settings.google_places_ready);
+  const anthropicReady = Boolean(settings.anthropic_configured);
+  const openaiReady = Boolean(settings.openai_configured);
+  const activeProvider = settings.ai_provider_active || "";
+  const providerLabel = { anthropic: "Claude", openai: "OpenAI" }[activeProvider] || "Nessuno";
+  const strategy = state.strategy || {};
+  const strategySettings = strategy.settings || {};
+  const zones = (strategy.google_places?.zones || []).length;
+  const categories = (strategy.google_places?.categories || []).filter((item) => item.selected).length;
+  const aiServices = (state.aiControl?.services || []).length;
+  $("#providerStatusLabel").textContent = googleReady || anthropicReady || openaiReady ? `Attivo: ${providerLabel}` : "Non configurato";
+  $("#googlePlacesEnabledInput").checked = googleEnabled;
+  $("#aiProviderSelect").value = settings.ai_provider || "auto";
+  $("#anthropicModelInput").value = settings.anthropic_model || "claude-sonnet-5";
+  $("#openaiModelInput").value = settings.openai_model || "gpt-5.2";
+  $("#monthlyBudgetInput").value = settings.monthly_budget_eur || "";
+  $("#providerStatusGrid").innerHTML = `
+    <div class="status-item ${googleReady ? "ready" : ""}">
+      <span>Google Maps</span>
+      <strong>${googleReady ? "A consumo" : googleHasKey ? "Spento" : "Fuori budget"}</strong>
+      <small>${escapeHtml(googleReady ? settings.google_places_key : googleHasKey ? "chiave salvata, toggle spento" : "non necessario ora")}</small>
+    </div>
+    <div class="status-item ${anthropicReady ? "ready" : ""}">
+      <span>Claude</span>
+      <strong>${anthropicReady ? "Attivo" : "Da configurare"}</strong>
+      <small>${escapeHtml(settings.anthropic_key || settings.anthropic_source || "-")}</small>
+    </div>
+    <div class="status-item ${openaiReady ? "ready" : ""}">
+      <span>OpenAI</span>
+      <strong>${openaiReady ? "Attivo" : "Da configurare"}</strong>
+      <small>${escapeHtml(settings.openai_key || settings.openai_source || "-")}</small>
+    </div>
+    <div class="status-item ${activeProvider ? "ready" : ""}">
+      <span>AI attiva</span>
+      <strong>${escapeHtml(providerLabel)}</strong>
+      <small>modalita ${escapeHtml(settings.ai_provider || "auto")}</small>
+    </div>
+    <div class="status-item ready">
+      <span>Gratis</span>
+      <strong>OpenStreetMap</strong>
+      <small>sempre disponibile</small>
+    </div>
+    <div class="status-item ready">
+      <span>Strategia</span>
+      <strong>${zones} zone · ${categories} categorie</strong>
+      <small>${strategySettings.places_require_contact ? "solo lead contattabili" : "contatto opzionale"}</small>
+    </div>
+    <div class="status-item ready">
+      <span>AI Brain</span>
+      <strong>${aiServices} servizi</strong>
+      <small>${escapeHtml(state.aiControl?.settings?.ai_tone || "tono da configurare")}</small>
+    </div>
+  `;
+  renderDiscoveryProviders();
+}
+
+function googleDiscoveryReady() {
+  const settings = state.providers || {};
+  return Boolean(settings.google_places_enabled && settings.google_places_ready);
+}
+
+function renderDiscoveryProviders() {
+  const googleReady = googleDiscoveryReady();
+  const googleOption = googleReady ? '<option value="google">Google Places a consumo</option>' : "";
+  const finder = $("#finderProvider");
+  const batch = $("#batchProvider");
+  if (finder) {
+    const current = finder.value;
+    finder.innerHTML = `<option value="osm">OpenStreetMap gratis</option>${googleOption}`;
+    finder.value = googleReady && current === "google" ? "google" : "osm";
+  }
+  if (batch) {
+    const current = batch.value;
+    batch.innerHTML = `<option value="auto">Auto gratis</option><option value="osm">OpenStreetMap gratis</option>${googleOption}`;
+    batch.value = googleReady && current === "google" ? "google" : current === "osm" ? "osm" : "auto";
+  }
+}
+
+function strategyValues(value = "") {
+  return String(value)
+    .split(/[\n,;]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function applyDiscoveryDefaults() {
+  const form = $("#leadFinderForm");
+  if (!form || !state.strategy) return;
+  const settings = state.strategy.settings || {};
+  const firstZone = strategyValues(settings.target_zones || "")[0];
+  const firstSector = strategyValues(settings.target_sectors || "")[0];
+  if (firstZone && !form.elements.city.value.trim()) form.elements.city.value = firstZone;
+  if (firstSector && Array.from(form.elements.sector.options).some((option) => option.value === firstSector)) {
+    form.elements.sector.value = firstSector;
+  }
+  if (settings.places_default_limit) form.elements.limit.value = settings.places_default_limit;
+  form.elements.only_without_website.checked = Boolean(settings.places_only_without_website);
+  form.elements.require_contact.checked = Boolean(settings.places_require_contact);
+  renderDiscoveryProviders();
+
+  const batchForm = $("#batchScannerForm");
+  if (batchForm) {
+    batchForm.elements.zones.value = settings.target_zones || "";
+    batchForm.elements.only_without_website.checked = Boolean(settings.places_only_without_website);
+    batchForm.elements.require_contact.checked = Boolean(settings.places_require_contact);
+  }
+}
+
+function renderPlaybookList(items = []) {
+  return items.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+}
+
+function renderStrategy() {
+  if (!state.strategy) return;
+  const settings = state.strategy.settings || {};
+  const google = state.strategy.google_places || {};
+  const openai = state.strategy.openai || {};
+  const selected = new Set(strategyValues(settings.target_sectors || ""));
+
+  $("#targetZonesInput").value = settings.target_zones || "";
+  $("#placesDefaultLimitInput").value = settings.places_default_limit || 25;
+  $("#placesOnlyWithoutWebsiteInput").checked = Boolean(settings.places_only_without_website);
+  $("#placesRequireContactInput").checked = Boolean(settings.places_require_contact);
+  $("#openaiPriceFloorInput").value = settings.openai_price_floor || 450;
+  $("#openaiPriceCeilingInput").value = settings.openai_price_ceiling || 1800;
+
+  $("#strategySectorChecks").innerHTML = (google.categories || [])
+    .map((sector) => `
+      <label class="sector-check">
+        <input type="checkbox" name="target_sector" value="${escapeHtml(sector.key)}" ${selected.has(sector.key) ? "checked" : ""}>
+        <span>
+          <strong>${escapeHtml(sector.label)}</strong>
+          <small>${escapeHtml(sector.default_offer)} · +${Number(sector.score_weight || 0)} score</small>
+        </span>
+      </label>
+    `)
+    .join("");
+
+  $("#strategyGoogleSummary").innerHTML = `
+    <div class="strategy-summary-line">
+      <span>Motore</span>
+      <strong>OpenStreetMap gratis${googleDiscoveryReady() ? " · Google a consumo disponibile" : ""}</strong>
+    </div>
+    <div class="strategy-summary-line">
+      <span>Zone</span>
+      <strong>${(google.zones || []).map(escapeHtml).join(" · ")}</strong>
+    </div>
+    <div class="strategy-summary-line">
+      <span>Dati salvati</span>
+      <ul>${renderPlaybookList(google.data_fields || [])}</ul>
+    </div>
+    <div class="strategy-summary-line">
+      <span>Anti duplicati</span>
+      <ul>${renderPlaybookList(google.duplicate_policy || [])}</ul>
+    </div>
+    <div class="strategy-summary-line">
+      <span>Score</span>
+      <ul>${renderPlaybookList(google.score_formula || [])}</ul>
+    </div>
+  `;
+
+  $("#strategyAiSummary").innerHTML = `
+    <div class="strategy-summary-line">
+      <span>Azioni AI</span>
+      <ul>${renderPlaybookList(openai.tasks || [])}</ul>
+    </div>
+    <div class="strategy-summary-line">
+      <span>Output</span>
+      <ul>${renderPlaybookList(openai.outputs || [])}</ul>
+    </div>
+    <div class="strategy-summary-line">
+      <span>Prezzo</span>
+      <strong>${escapeHtml(openai.pricing?.default_range || "")}</strong>
+    </div>
+    <div class="strategy-summary-line">
+      <span>Regole</span>
+      <ul>${renderPlaybookList(openai.guardrails || [])}</ul>
+    </div>
+  `;
+}
+
+function renderAIControl() {
+  if (!state.aiControl) return;
+  const settings = state.aiControl.settings || {};
+  $("#aiSellerNameInput").value = settings.ai_seller_name || "";
+  $("#aiBusinessNameInput").value = settings.ai_business_name || "";
+  $("#aiToneInput").value = settings.ai_tone || "";
+  $("#aiServicesInput").value = settings.ai_services || "";
+  $("#aiIdealCustomerInput").value = settings.ai_ideal_customer || "";
+  $("#aiOfferFocusInput").value = settings.ai_offer_focus || "";
+  $("#aiProofPointsInput").value = settings.ai_proof_points || "";
+  $("#aiMessageStyleInput").value = settings.ai_message_style || "";
+  $("#aiFollowupPlanInput").value = settings.ai_followup_plan || "";
+
+  $("#aiControlSummary").innerHTML = `
+    <div class="strategy-summary-line">
+      <span>Voce</span>
+      <strong>${escapeHtml([settings.ai_seller_name, settings.ai_tone].filter(Boolean).join(" · "))}</strong>
+    </div>
+    <div class="strategy-summary-line">
+      <span>Servizi</span>
+      <ul>${renderPlaybookList(state.aiControl.services || [])}</ul>
+    </div>
+    <div class="strategy-summary-line">
+      <span>Prove</span>
+      <ul>${renderPlaybookList(state.aiControl.proof_points || [])}</ul>
+    </div>
+    <div class="strategy-summary-line">
+      <span>Follow-up</span>
+      <ul>${renderPlaybookList(state.aiControl.followup_plan || [])}</ul>
+    </div>
+  `;
+}
+
+async function saveAIControl(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  $("#aiControlSaveStatus").textContent = "Salvataggio";
+  const payload = formPayload(form);
+  try {
+    const data = await api("/api/ai-control", { method: "POST", body: JSON.stringify(payload) });
+    state.aiControl = data.ai_control;
+    renderAIControl();
+    renderProviderStatus();
+    $("#aiControlSaveStatus").textContent = "Salvato";
+    toast("AI Control Center salvato");
+  } catch (error) {
+    $("#aiControlSaveStatus").textContent = "Errore";
+    toast(error.message);
+  }
+}
+
+async function saveStrategy(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  $("#strategySaveStatus").textContent = "Salvataggio";
+  const payload = {
+    target_zones: form.elements.target_zones.value,
+    target_sectors: $$('input[name="target_sector"]:checked', form).map((input) => input.value),
+    places_default_limit: Number(form.elements.places_default_limit.value || 25),
+    places_only_without_website: form.elements.places_only_without_website.checked,
+    places_require_contact: form.elements.places_require_contact.checked,
+    openai_price_floor: Number(form.elements.openai_price_floor.value || 450),
+    openai_price_ceiling: Number(form.elements.openai_price_ceiling.value || 1800),
+  };
+  try {
+    const data = await api("/api/strategy", { method: "POST", body: JSON.stringify(payload) });
+    state.strategy = data.strategy;
+    renderProviderStatus();
+    renderStrategy();
+    applyDiscoveryDefaults();
+    $("#strategySaveStatus").textContent = "Salvata";
+    toast("Strategia salvata");
+  } catch (error) {
+    $("#strategySaveStatus").textContent = "Errore";
+    toast(error.message);
+  }
+}
+
+async function saveSettings(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  $("#settingsSaveStatus").textContent = "Salvataggio";
+  const payload = formPayload(form);
+  payload.google_places_enabled = form.elements.google_places_enabled.checked ? "1" : "0";
+  try {
+    const data = await api("/api/settings", { method: "POST", body: JSON.stringify(payload) });
+    state.providers = data.settings;
+    form.elements.google_places_api_key.value = "";
+    form.elements.anthropic_api_key.value = "";
+    form.elements.openai_api_key.value = "";
+    renderProviderStatus();
+    $("#settingsSaveStatus").textContent = "Salvato";
+    toast("Provider salvati");
+  } catch (error) {
+    $("#settingsSaveStatus").textContent = "Errore";
+    toast(error.message);
+  }
+}
+
+async function generateMessage() {
+  if (!state.selectedLead) return;
+  try {
+    const data = await api(`/api/leads/${state.selectedLead.id}/message`, {
+      method: "POST",
+      body: JSON.stringify({
+        channel: $("#messageChannel").value,
+        offer: $("#messageOffer").value,
+        ai: $("#messageUseAI").checked,
+      }),
+    });
+    $("#messageSubject").value = data.message.subject;
+    $("#messageBody").value = data.message.body;
+    toast($("#messageUseAI").checked ? "Messaggio AI generato" : "Messaggio generato");
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function copyMessage() {
+  const text = [$("#messageSubject").value, $("#messageBody").value].filter(Boolean).join("\n\n");
+  await navigator.clipboard.writeText(text);
+  toast("Messaggio copiato");
+}
+
+function openMailto() {
+  if (!state.selectedLead) return;
+  const email = (state.selectedLead.contacts || []).find((contact) => contact.type === "email")?.value;
+  const subject = encodeURIComponent($("#messageSubject").value);
+  const body = encodeURIComponent($("#messageBody").value);
+  window.location.href = `mailto:${email || ""}?subject=${subject}&body=${body}`;
+}
+
+async function logGeneratedMessage() {
+  if (!state.selectedLead) return;
+  await api(`/api/leads/${state.selectedLead.id}/activities`, {
+    method: "POST",
+    body: JSON.stringify({
+      kind: $("#messageChannel").value === "email" ? "email" : "dm",
+      subject: $("#messageSubject").value || "Primo contatto",
+      body: $("#messageBody").value,
+      channel: $("#messageChannel").value,
+      outcome: "Preparato",
+    }),
+  });
+  await selectLead(state.selectedLead.id, false);
+  toast("Contatto registrato");
+}
+
+function parseCsv(text) {
+  const rows = [];
+  const lines = text.split(/\r?\n/).filter((line) => line.trim());
+  if (!lines.length) return rows;
+  const delimiter = lines[0].includes(";") ? ";" : ",";
+  const headers = lines[0].split(delimiter).map((item) => item.trim());
+  for (const line of lines.slice(1)) {
+    const values = line.split(delimiter).map((item) => item.trim());
+    const row = {};
+    headers.forEach((header, index) => {
+      row[header] = values[index] || "";
+    });
+    const contacts = [];
+    if (row.email) contacts.push({ type: "email", value: row.email });
+    if (row.phone) contacts.push({ type: "telefono", value: row.phone });
+    row.contacts = contacts;
+    rows.push(row);
+  }
+  return rows;
+}
+
+async function importCsv() {
+  const file = $("#csvInput").files[0];
+  if (!file) {
+    toast("Seleziona un CSV");
+    return;
+  }
+  const text = await file.text();
+  const rows = parseCsv(text);
+  const data = await api("/api/import/leads", { method: "POST", body: JSON.stringify({ rows }) });
+  await refreshAll();
+  toast(`${data.count} lead importati`);
+}
+
+init().catch((error) => {
+  console.error(error);
+  toast(error.message);
+});
