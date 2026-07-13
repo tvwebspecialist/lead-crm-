@@ -15,11 +15,14 @@ const state = {
   providers: null,
   strategy: null,
   aiControl: null,
+  info: null,
   workbench: null,
   map: null,
   currentUser: null,
   users: [],
   roles: {},
+  assistantHistory: [],
+  assistantBusy: false,
   eventsBound: false,
 };
 
@@ -77,6 +80,14 @@ function escapeHtml(value = "") {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function renderMultiline(value = "") {
+  return escapeHtml(value).replaceAll("\n", "<br>");
+}
+
+function providerLabel(value = "") {
+  return { anthropic: "Claude", openai: "OpenAI", locale: "Locale" }[value] || "Locale";
 }
 
 function formatDate(value) {
@@ -253,6 +264,9 @@ function bindEvents() {
   $("#settingsForm").addEventListener("submit", saveSettings);
   $("#strategyForm").addEventListener("submit", saveStrategy);
   $("#aiControlForm").addEventListener("submit", saveAIControl);
+  $("#infoKnowledgeForm").addEventListener("submit", saveInfoKnowledge);
+  $("#assistantChatForm").addEventListener("submit", sendAssistantMessage);
+  $("#assistantClearBtn").addEventListener("click", clearAssistantChat);
   $("#createUserForm").addEventListener("submit", createUserFromForm);
   $("#importBtn").addEventListener("click", importCsv);
   $("#generateMessageBtn").addEventListener("click", generateMessage);
@@ -276,12 +290,16 @@ function switchView(view) {
     discovery: ["Acquisizione", "Ricerca"],
     map: ["Geografia commerciale", "Mappa"],
     messages: ["Outreach", "Messaggi"],
+    facundo: ["Copilot operativo", "Facundo"],
+    info: ["Documentazione operativa", "Info"],
     settings: ["Motori esterni", "Provider"],
     users: ["Accessi e ruoli", "Utenti"],
   };
   $("#viewEyebrow").textContent = titles[view][0];
   $("#viewTitle").textContent = titles[view][1];
   if (view === "messages") renderMessagePanel();
+  if (view === "info") loadInfo();
+  if (view === "facundo") loadInfo();
   if (view === "settings") renderProviderStatus();
   if (view === "settings") renderStrategy();
   if (view === "settings") renderAIControl();
@@ -321,6 +339,284 @@ async function loadTeam() {
   const data = await api("/api/team");
   state.team = data.users || [];
   renderReminderOptions();
+}
+
+async function loadInfo(force = false) {
+  if (!force && state.info) {
+    ensureAssistantWelcome();
+    renderInfo();
+    renderFacundo();
+    return;
+  }
+  const data = await api("/api/info");
+  state.info = data.info || null;
+  ensureAssistantWelcome();
+  renderInfo();
+  renderFacundo();
+}
+
+function ensureAssistantWelcome() {
+  if (state.assistantHistory.length) return;
+  const label = providerLabel(state.info?.assistant_provider || "locale");
+  state.assistantHistory = [
+    {
+      role: "assistant",
+      content:
+        `Sono Facundo. Posso leggere il CRM, usare la knowledge base interna e aiutarti ad aprire lead, aggiornare pipeline, creare reminder, generare messaggi e spiegare procedure operative. Provider attuale: ${label}.`,
+      usedContext: ["knowledge base interna", "snapshot CRM", "azioni CRM abilitate"],
+      followUps: state.info?.suggested_questions?.slice(0, 2) || [],
+    },
+  ];
+}
+
+function renderInfo() {
+  if (!state.info) return;
+  const summary = state.info.summary || {};
+  const provider = providerLabel(state.info.assistant_provider || "locale");
+  $("#infoAssistantBadge").textContent = state.info.assistant_ready ? `${state.info.assistant_name || "Facundo"} ${provider}` : `${state.info.assistant_name || "Facundo"} locale`;
+  $("#infoSummaryGrid").innerHTML = `
+    <div class="mini-stat">
+      <span>App Fly</span>
+      <strong>${escapeHtml(state.info.app_name || "-")}</strong>
+      <small>${escapeHtml(state.info.primary_region || "-")} · ${escapeHtml(state.info.app_url || "-")}</small>
+    </div>
+    <div class="mini-stat">
+      <span>Lead attivi</span>
+      <strong>${Number(summary.total_leads || 0)}</strong>
+      <small>${Number(summary.hot_leads || 0)} lead caldi</small>
+    </div>
+    <div class="mini-stat">
+      <span>Follow-up</span>
+      <strong>${Number(summary.due_followups || 0)}</strong>
+      <small>${Number(summary.reminders_due || 0)} reminder in scadenza</small>
+    </div>
+    <div class="mini-stat">
+      <span>Backup retention</span>
+      <strong>${Number(summary.backups_retention_days || 30)} giorni</strong>
+      <small>cartella ~/crm-backups</small>
+    </div>
+  `;
+  $("#infoSections").innerHTML = (state.info.sections || [])
+    .map(
+      (section) => `
+        <article class="tool-panel info-doc-card">
+          <div class="section-heading compact">
+            <div>
+              <h2>${escapeHtml(section.title || "")}</h2>
+              <p class="lead-meta">${escapeHtml(section.summary || "")}</p>
+            </div>
+          </div>
+          <div class="info-doc-list">
+            ${(section.bullets || []).map((item) => `<div class="info-doc-line"><span></span><p>${escapeHtml(item)}</p></div>`).join("")}
+          </div>
+          ${
+            (section.commands || []).length
+              ? `<pre class="info-code-block">${escapeHtml((section.commands || []).join("\n"))}</pre>`
+              : ""
+          }
+        </article>
+      `
+    )
+    .join("");
+}
+
+function renderFacundo() {
+  if (!state.info) return;
+  const summary = state.info.summary || {};
+  const provider = providerLabel(state.info.assistant_provider || "locale");
+  const capabilities = state.info.assistant_capabilities || [];
+  $("#assistantProviderLabel").textContent = state.info.assistant_ready ? provider : "Locale";
+  $("#assistantKnowledgeInput").value = state.info.assistant_knowledge || "";
+  $("#facundoCapabilityBadge").textContent = state.info.assistant_ready ? `${provider} + CRM` : "Locale + CRM";
+  $("#facundoSummaryGrid").innerHTML = `
+    <div class="mini-stat">
+      <span>Motore attivo</span>
+      <strong>${escapeHtml(state.info.assistant_name || "Facundo")}</strong>
+      <small>${escapeHtml(provider)} · ${state.info.assistant_ready ? "AI attiva" : "fallback locale"}</small>
+    </div>
+    <div class="mini-stat">
+      <span>Lead caldi</span>
+      <strong>${Number(summary.hot_leads || 0)}</strong>
+      <small>${Number(summary.total_leads || 0)} lead attivi nel CRM</small>
+    </div>
+    <div class="mini-stat">
+      <span>Reminder aperti</span>
+      <strong>${Number(summary.reminders_due || 0)}</strong>
+      <small>${Number(summary.due_followups || 0)} follow-up da gestire</small>
+    </div>
+    <div class="mini-stat">
+      <span>Azioni abilitate</span>
+      <strong>${capabilities.length || 0}</strong>
+      <small>lead, reminder, messaggi e scoring</small>
+    </div>
+  `;
+  $("#facundoCapabilities").innerHTML = capabilities
+    .map(
+      (item) => `
+        <article class="facundo-capability-card">
+          <strong>${escapeHtml(item.title || "")}</strong>
+          <p>${escapeHtml(item.summary || "")}</p>
+        </article>
+      `
+    )
+    .join("");
+  renderAssistantPrompts();
+  renderAssistantThread();
+}
+
+function renderAssistantPrompts() {
+  const promptGrid = $("#assistantPromptGrid");
+  if (!promptGrid) return;
+  const prompts = state.info?.suggested_questions || [];
+  promptGrid.innerHTML = prompts
+    .map(
+      (prompt, index) => `
+        <button class="secondary assistant-prompt" type="button" data-prompt-index="${index}">
+          <span>${escapeHtml(prompt)}</span>
+        </button>
+      `
+    )
+    .join("");
+  $$(".assistant-prompt").forEach((button) => {
+    button.addEventListener("click", () => {
+      const prompt = prompts[Number(button.dataset.promptIndex)] || "";
+      $("#assistantMessageInput").value = prompt;
+      $("#assistantMessageInput").focus();
+    });
+  });
+}
+
+function renderAssistantThread() {
+  const thread = $("#assistantThread");
+  if (!thread) return;
+  const bubbles = state.assistantHistory
+    .map((entry) => {
+      const followUps = (entry.followUps || [])
+        .map((item) => `<span class="assistant-chip">${escapeHtml(item)}</span>`)
+        .join("");
+      const usedContext = (entry.usedContext || [])
+        .map((item) => `<span class="assistant-chip muted">${escapeHtml(item)}</span>`)
+        .join("");
+      const actionResults = renderAssistantActions(entry.actions || []);
+      return `
+        <article class="assistant-bubble ${entry.role === "user" ? "user" : "assistant"}">
+          <header>
+            <strong>${entry.role === "user" ? "Tu" : "Facundo"}</strong>
+          </header>
+          <div class="assistant-body">${renderMultiline(entry.content || "")}</div>
+          ${actionResults}
+          ${usedContext ? `<div class="assistant-chip-row">${usedContext}</div>` : ""}
+          ${followUps ? `<div class="assistant-chip-row">${followUps}</div>` : ""}
+        </article>
+      `;
+    })
+    .join("");
+  const loading = state.assistantBusy
+    ? `
+      <article class="assistant-bubble assistant">
+        <header><strong>Facundo</strong></header>
+        <div class="assistant-body">Sto preparando la risposta...</div>
+      </article>
+    `
+    : "";
+  thread.innerHTML = bubbles + loading;
+  $$("[data-assistant-open-lead]", thread).forEach((button) => {
+    button.addEventListener("click", () => selectLead(Number(button.dataset.assistantOpenLead), false, true));
+  });
+  thread.scrollTop = thread.scrollHeight;
+}
+
+function renderAssistantActions(actions = []) {
+  if (!actions.length) return "";
+  return `
+    <div class="assistant-action-list">
+      ${actions
+        .map(
+          (action) => `
+            <div class="assistant-action-card ${action.ok ? "success" : "error"}">
+              <div class="assistant-action-head">
+                <strong>${escapeHtml(action.title || action.type || "Azione CRM")}</strong>
+                <span>${action.ok ? "OK" : "Errore"}</span>
+              </div>
+              <p>${escapeHtml(action.summary || "Nessun dettaglio disponibile")}</p>
+              ${action.details ? `<div class="assistant-action-detail">${renderMultiline(action.details)}</div>` : ""}
+              ${action.lead_id ? `<button class="secondary mini-button" type="button" data-assistant-open-lead="${Number(action.lead_id)}">Apri lead</button>` : ""}
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+async function saveInfoKnowledge(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  $("#infoKnowledgeStatus").textContent = "Salvataggio";
+  try {
+    const data = await api("/api/info", { method: "POST", body: JSON.stringify(formPayload(form)) });
+    state.info = data.info || state.info;
+    $("#infoKnowledgeStatus").textContent = "Salvata";
+    renderInfo();
+    renderFacundo();
+    toast("Knowledge base aggiornata");
+  } catch (error) {
+    $("#infoKnowledgeStatus").textContent = "Errore";
+    toast(error.message);
+  }
+}
+
+async function sendAssistantMessage(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const textarea = $("#assistantMessageInput");
+  const message = textarea.value.trim();
+  if (!message || state.assistantBusy) return;
+  state.assistantHistory.push({ role: "user", content: message });
+  textarea.value = "";
+  state.assistantBusy = true;
+  renderAssistantThread();
+  try {
+    const data = await api("/api/facundo/chat", {
+      method: "POST",
+      body: JSON.stringify({
+        message,
+        history: state.assistantHistory.slice(-8).map((item) => ({ role: item.role, content: item.content })),
+      }),
+    });
+    state.assistantHistory.push({
+      role: "assistant",
+      content: data.reply?.answer || "Nessuna risposta disponibile.",
+      followUps: data.reply?.follow_ups || [],
+      usedContext: [
+        ...(data.reply?.used_context || []),
+        data.provider ? `provider: ${providerLabel(data.provider)}` : "",
+        (data.executed_actions || []).length ? "azioni CRM eseguite" : "",
+      ].filter(Boolean),
+      actions: data.executed_actions || [],
+    });
+    if (data.warning) toast(data.warning);
+    if (data.refresh_required) await refreshAll();
+    if (data.selected_lead_id) await selectLead(data.selected_lead_id, false, false);
+  } catch (error) {
+    state.assistantHistory.push({
+      role: "assistant",
+      content: `Non riesco a rispondere in questo momento: ${error.message}`,
+      usedContext: ["errore richiesta"],
+      followUps: [],
+    });
+    toast(error.message);
+  } finally {
+    state.assistantBusy = false;
+    renderAssistantThread();
+  }
+}
+
+function clearAssistantChat() {
+  state.assistantHistory = [];
+  ensureAssistantWelcome();
+  renderAssistantThread();
+  toast("Chat pulita");
 }
 
 function currentLeadQuery() {

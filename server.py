@@ -96,10 +96,38 @@ SETTING_KEYS = {
     "ai_proof_points",
     "ai_message_style",
     "ai_followup_plan",
+    "assistant_knowledge",
 }
 DEFAULT_OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.2")
 DEFAULT_ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
 AI_PROVIDERS = {"auto", "anthropic", "openai"}
+PUBLIC_APP_URL = os.environ.get("CRM_PUBLIC_BASE_URL", "https://lead-crm-tommaso.fly.dev").strip() or "https://lead-crm-tommaso.fly.dev"
+PUBLIC_APP_NAME = os.environ.get("CRM_PUBLIC_APP_NAME", "lead-crm-tommaso").strip() or "lead-crm-tommaso"
+PRIMARY_REGION = os.environ.get("CRM_PRIMARY_REGION", "fra").strip() or "fra"
+FACUNDO_NAME = "Facundo"
+FACUNDO_ACTION_TYPES = [
+    "open_lead",
+    "search_leads",
+    "create_lead",
+    "update_lead",
+    "create_reminder",
+    "generate_message",
+    "research_lead",
+    "score_lead",
+]
+FACUNDO_STAGE_ALIASES = {
+    "nuovo": "Nuovo",
+    "da arricchire": "Da arricchire",
+    "pronto da contattare": "Pronto da contattare",
+    "da verificare": "Da verificare",
+    "contattato": "Contattato",
+    "interessato": "Interessato",
+    "preventivo": "Preventivo",
+    "vinto": "Vinto",
+    "chiuso": "Chiuso",
+    "perso": "Perso",
+}
+FACUNDO_PRIORITY_ALIASES = {"alta": "Alta", "media": "Media", "bassa": "Bassa"}
 DEFAULT_TARGET_ZONES = ["Milano", "Brescia", "Verona", "Vicenza", "Padova"]
 DEFAULT_TARGET_SECTORS = [
     "restaurants",
@@ -267,6 +295,44 @@ DEFAULT_AI_CONTROL = {
             "giorno 30: riattivazione leggera",
         ]
     ),
+}
+
+ASSISTANT_STOPWORDS = {
+    "che",
+    "con",
+    "come",
+    "della",
+    "delle",
+    "dello",
+    "degli",
+    "dalla",
+    "dalle",
+    "dallo",
+    "dentro",
+    "dopo",
+    "fare",
+    "fatto",
+    "fino",
+    "lead",
+    "info",
+    "sono",
+    "sulla",
+    "sulle",
+    "sugli",
+    "sugli",
+    "suggerisci",
+    "tutto",
+    "questa",
+    "questo",
+    "quale",
+    "quali",
+    "dove",
+    "quando",
+    "perche",
+    "quindi",
+    "anche",
+    "della",
+    "degli",
 }
 
 
@@ -1069,6 +1135,933 @@ def ai_strategy_context(conn):
             "message_style": ai_control["settings"]["ai_message_style"],
             "followup_plan": ai_control["followup_plan"],
         },
+    }
+
+
+def info_sections_snapshot():
+    return [
+        {
+            "id": "production",
+            "title": "Produzione Fly.io",
+            "summary": "Configurazione dell'istanza pubblica del CRM e punti da controllare in deploy.",
+            "bullets": [
+                f"App Fly.io: {PUBLIC_APP_NAME}",
+                f"URL pubblico: {PUBLIC_APP_URL}",
+                f"Regione primaria: {PRIMARY_REGION}",
+                "Volume persistente montato su /data",
+                "Database SQLite in produzione: /data/crm.sqlite3",
+                "Avvio server: python3 server.py --host 0.0.0.0 --port 8080",
+                "Cookie Secure attivo quando CRM_COOKIE_SECURE=true",
+            ],
+            "commands": [
+                f"fly status -a {PUBLIC_APP_NAME}",
+                f"fly logs -a {PUBLIC_APP_NAME} --no-tail",
+                f"curl -I {PUBLIC_APP_URL}/",
+            ],
+        },
+        {
+            "id": "backup",
+            "title": "Backup automatico macOS",
+            "summary": "Script locale con login autenticato al CRM, export CSV e retention di 30 giorni.",
+            "bullets": [
+                "Script locale: backup_crm.py",
+                "Cartella backup: ~/crm-backups/",
+                "Nome file: crm-backup-YYYY-MM-DD-HHMM.csv",
+                "Retention automatica: elimina backup piu vecchi di 30 giorni",
+                "Credenziali lette da ~/.crm-backup-env",
+                "Il plist launchd usa ~/Library/LaunchAgents/com.leadcrm.backup.plist",
+            ],
+            "commands": [
+                "chmod 600 ~/.crm-backup-env",
+                "launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.leadcrm.backup.plist",
+                "launchctl kickstart -k gui/$(id -u)/com.leadcrm.backup",
+            ],
+        },
+        {
+            "id": "api",
+            "title": "Endpoint utili",
+            "summary": "Route operative confermate nel backend corrente.",
+            "bullets": [
+                "Login: POST /api/login con JSON {email, password}",
+                "Verifica sessione: GET /api/session",
+                "Export CSV: GET /api/export/leads.csv con cookie di sessione",
+                "Risposta export: text/csv; charset=utf-8",
+                "Campi CSV: id, company_name, sector, city, website, category, stage, priority, score, opportunity, notes, next_follow_up, created_at",
+            ],
+            "commands": [
+                "POST /api/login",
+                "GET /api/session",
+                "GET /api/export/leads.csv",
+            ],
+        },
+        {
+            "id": "assistant",
+            "title": "Facundo",
+            "summary": "Copilot operativo del CRM con pagina dedicata, knowledge base interna e azioni controllate sul database.",
+            "bullets": [
+                "Usa la chiave AI gia configurata nella pagina Provider, con priorita al provider attivo",
+                "Se la chiave non e disponibile, torna a una risposta locale basata su dati e documentazione interna",
+                "La pagina Facundo puo aprire lead, aggiornare pipeline, creare reminder, generare messaggi, fare research e scoring",
+                "Puoi salvare note operative, policy, listini e procedure nella knowledge base dedicata",
+                "Il bot legge statistiche CRM, lead rilevanti, reminder aperti, strategia e note interne",
+            ],
+            "commands": [
+                "Suggerimento: chiedi quali lead caldi hanno follow-up oggi",
+                "Suggerimento: chiedi di spostare un lead in Preventivo",
+                "Suggerimento: chiedi di creare un reminder per domani",
+            ],
+        },
+    ]
+
+
+def assistant_capabilities_snapshot():
+    return [
+        {
+            "title": "Apri e cerca lead",
+            "summary": "Trova aziende nel DB per nome o ID e apri subito il lead corretto.",
+        },
+        {
+            "title": "Aggiorna la pipeline",
+            "summary": "Puoi cambiare fase, priorita, follow-up, note e altri campi chiave del lead.",
+        },
+        {
+            "title": "Crea reminder",
+            "summary": "Genera promemoria operativi agganciati ai lead e assegnati all'utente corrente.",
+        },
+        {
+            "title": "Genera messaggi",
+            "summary": "Prepara email o messaggi commerciali con template locali o AI esterna.",
+        },
+        {
+            "title": "Research e scoring",
+            "summary": "Lancia research AI e scoring del lead quando il provider e configurato.",
+        },
+        {
+            "title": "Risposte operative",
+            "summary": "Spiega backup, deploy, provider, procedure interne e priorita del CRM.",
+        },
+    ]
+
+
+def info_snapshot(conn):
+    provider = active_ai_provider(conn, require_key=False)
+    stats_snapshot = stats(conn)
+    return {
+        "app_url": PUBLIC_APP_URL,
+        "app_name": PUBLIC_APP_NAME,
+        "primary_region": PRIMARY_REGION,
+        "assistant_name": FACUNDO_NAME,
+        "assistant_provider": provider or "locale",
+        "assistant_ready": bool(provider),
+        "assistant_knowledge": get_setting(conn, "assistant_knowledge"),
+        "assistant_capabilities": assistant_capabilities_snapshot(),
+        "summary": {
+            "total_leads": stats_snapshot["total"],
+            "hot_leads": stats_snapshot["hot"],
+            "due_followups": stats_snapshot["due"],
+            "reminders_due": stats_snapshot["reminders_due"],
+            "backups_retention_days": 30,
+        },
+        "suggested_questions": [
+            "Quali lead caldi hanno follow-up oggi?",
+            "Apri il lead con score piu alto.",
+            "Sposta un lead in Preventivo e crea un reminder per domani.",
+            "Come funziona il backup automatico del CRM?",
+            "Riassumimi le priorita commerciali del CRM.",
+        ],
+        "sections": info_sections_snapshot(),
+    }
+
+
+def assistant_keyword_tokens(message):
+    tokens = []
+    seen = set()
+    for raw in re.findall(r"[0-9A-Za-zÀ-ÖØ-öø-ÿ]+", (message or "").lower()):
+        if len(raw) < 3 or raw in ASSISTANT_STOPWORDS or raw in seen:
+            continue
+        seen.add(raw)
+        tokens.append(raw)
+        if len(tokens) >= 6:
+            break
+    return tokens
+
+
+def assistant_relevant_leads(conn, message, limit=8):
+    tokens = assistant_keyword_tokens(message)
+    where_clauses = ["deleted_at IS NULL"]
+    params = []
+    if tokens:
+        token_clauses = []
+        for token in tokens:
+            like = f"%{token}%"
+            token_clauses.append(
+                "(lower(company_name) LIKE ? OR lower(COALESCE(sector, '')) LIKE ? OR lower(COALESCE(city, '')) LIKE ? OR lower(COALESCE(notes, '')) LIKE ?)"
+            )
+            params.extend([like, like, like, like])
+        where_clauses.append("(" + " OR ".join(token_clauses) + ")")
+    rows = conn.execute(
+        f"""
+        SELECT id, company_name, sector, city, category, stage, priority, score, website, next_follow_up, updated_at
+        FROM leads
+        WHERE {' AND '.join(where_clauses)}
+        ORDER BY score DESC, updated_at DESC
+        LIMIT ?
+        """,
+        [*params, limit],
+    ).fetchall()
+    return [to_dict(row) for row in rows]
+
+
+def assistant_open_reminders(conn, limit=8):
+    rows = conn.execute(
+        """
+        SELECT
+            a.id,
+            a.subject,
+            a.body,
+            a.due_at,
+            a.created_at,
+            l.id AS lead_id,
+            l.company_name,
+            u.name AS assigned_user_name
+        FROM activities a
+        JOIN leads l ON l.id = a.lead_id
+        LEFT JOIN users u ON u.id = a.assigned_user_id
+        WHERE a.kind = 'reminder'
+          AND COALESCE(a.completed_at, '') = ''
+          AND l.deleted_at IS NULL
+        ORDER BY
+          CASE WHEN COALESCE(a.due_at, '') = '' THEN 1 ELSE 0 END,
+          a.due_at ASC,
+          a.created_at DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    reminders = []
+    for row in rows:
+        data = to_dict(row)
+        reminders.append(
+            {
+                "id": data["id"],
+                "subject": data.get("subject", ""),
+                "body": short_text(data.get("body", ""), 240),
+                "due_at": data.get("due_at", ""),
+                "lead_id": data.get("lead_id"),
+                "company_name": data.get("company_name", ""),
+                "assigned_user_name": data.get("assigned_user_name", "") or "Non assegnato",
+            }
+        )
+    return reminders
+
+
+def assistant_context_snapshot(conn, message):
+    strategy = strategy_snapshot(conn)
+    providers = settings_snapshot(conn)
+    ai_control = ai_control_snapshot(conn)
+    leads = assistant_relevant_leads(conn, message)
+    reminders = assistant_open_reminders(conn)
+    summary = stats(conn)
+    return {
+        "summary": summary,
+        "relevant_leads": [
+            {
+                "id": lead["id"],
+                "company_name": lead.get("company_name", ""),
+                "sector": lead.get("sector", ""),
+                "city": lead.get("city", ""),
+                "category": lead.get("category", ""),
+                "stage": lead.get("stage", ""),
+                "priority": lead.get("priority", ""),
+                "score": lead.get("score", 0),
+                "website": lead.get("website", ""),
+                "next_follow_up": lead.get("next_follow_up", ""),
+            }
+            for lead in leads
+        ],
+        "open_reminders": reminders,
+        "providers": {
+            "active": providers.get("ai_provider_active", ""),
+            "requested": providers.get("ai_provider", ""),
+            "anthropic_configured": providers.get("anthropic_configured", False),
+            "openai_configured": providers.get("openai_configured", False),
+        },
+        "strategy": {
+            "zones": strategy["google_places"]["zones"],
+            "categories": [item["label"] for item in strategy["google_places"]["categories"] if item["selected"]],
+            "pricing": strategy["openai"]["pricing"],
+        },
+        "ai_control": {
+            "seller_name": ai_control["settings"]["ai_seller_name"],
+            "business_name": ai_control["settings"]["ai_business_name"],
+            "tone": ai_control["settings"]["ai_tone"],
+            "offer_focus": ai_control["settings"]["ai_offer_focus"],
+            "services": ai_control["services"],
+        },
+        "assistant_knowledge": short_text(get_setting(conn, "assistant_knowledge"), 5000),
+        "operational_info": info_sections_snapshot(),
+    }
+
+
+def assistant_chat_schema():
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "answer": {"type": "string"},
+            "follow_ups": {"type": "array", "items": {"type": "string"}},
+            "used_context": {"type": "array", "items": {"type": "string"}},
+            "actions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "type": {"type": "string", "enum": FACUNDO_ACTION_TYPES},
+                        "lead_id": {"type": "integer", "minimum": 1},
+                        "lead_ref": {"type": "string"},
+                        "search": {"type": "string"},
+                        "company_name": {"type": "string"},
+                        "sector": {"type": "string"},
+                        "city": {"type": "string"},
+                        "website": {"type": "string"},
+                        "source": {"type": "string"},
+                        "category": {"type": "string", "enum": ["", *CATEGORIES]},
+                        "stage": {"type": "string", "enum": ["", *STAGES]},
+                        "priority": {"type": "string", "enum": ["", *PRIORITIES]},
+                        "next_follow_up": {"type": "string"},
+                        "notes": {"type": "string"},
+                        "opportunity": {"type": "string"},
+                        "pain_points": {"type": "string"},
+                        "subject": {"type": "string"},
+                        "body": {"type": "string"},
+                        "due_at": {"type": "string"},
+                        "notify_at": {"type": "string"},
+                        "assigned_user_id": {"type": "integer", "minimum": 1},
+                        "channel": {"type": "string", "enum": ["", "email", "whatsapp", "dm", "call"]},
+                        "offer": {"type": "string"},
+                        "ai": {"type": "boolean"},
+                    },
+                    "required": ["type"],
+                },
+            },
+        },
+        "required": ["answer", "follow_ups", "used_context", "actions"],
+    }
+
+
+def local_assistant_reply(context, message):
+    lower = (message or "").lower()
+    summary = context["summary"]
+    top_leads = context["relevant_leads"][:3]
+    follow_ups = []
+    used_context = []
+
+    if any(keyword in lower for keyword in {"backup", "csv", "launchd", "plist", "env"}):
+        used_context = ["documentazione backup", "endpoint export CSV"]
+        answer = (
+            "Il backup automatico usa lo script locale backup_crm.py, si autentica con POST /api/login, "
+            "verifica la sessione su GET /api/session e scarica l'export da GET /api/export/leads.csv. "
+            "I file finiscono in ~/crm-backups/ e quelli piu vecchi di 30 giorni vengono rimossi automaticamente. "
+            "Le credenziali vanno in ~/.crm-backup-env e il job macOS usa ~/Library/LaunchAgents/com.leadcrm.backup.plist."
+        )
+        follow_ups = [
+            "Vuoi il riepilogo dei comandi launchctl?",
+            "Vuoi sapere quali colonne contiene il CSV?",
+        ]
+    elif any(keyword in lower for keyword in {"fly", "deploy", "produzione", "volume"}):
+        used_context = ["documentazione deploy", "configurazione Fly.io"]
+        answer = (
+            f"Il CRM pubblico gira su {PUBLIC_APP_URL} nell'app Fly.io {PUBLIC_APP_NAME}, regione {PRIMARY_REGION}. "
+            "Il database SQLite in produzione sta su /data/crm.sqlite3 con volume persistente montato su /data. "
+            "Il server viene avviato su 0.0.0.0:8080 e i cookie Secure vanno tenuti attivi in produzione."
+        )
+        follow_ups = [
+            "Vuoi il riepilogo dei controlli post-deploy?",
+            "Vuoi sapere dove viene salvato il database in produzione?",
+        ]
+    else:
+        used_context = ["stats CRM", "lead rilevanti", "reminder aperti"]
+        lead_text = ", ".join(
+            f"{lead['company_name']} ({lead['score']}/100, {lead['stage']})"
+            for lead in top_leads
+            if lead.get("company_name")
+        )
+        answer = (
+            f"Nel CRM ci sono {summary['total']} lead attivi, {summary['hot']} con score alto, "
+            f"{summary['due']} follow-up scaduti e {summary['reminders_due']} reminder in scadenza. "
+            f"I lead piu rilevanti per questa domanda sono: {lead_text or 'nessun lead specifico trovato nel contesto attuale'}."
+        )
+        follow_ups = [
+            "Vuoi che ti riassuma i lead piu caldi?",
+            "Vuoi sapere quali reminder sono aperti?",
+        ]
+
+    return {
+        "answer": answer,
+        "follow_ups": follow_ups,
+        "used_context": used_context,
+        "actions": [],
+    }
+
+
+def assistant_history_snapshot(payload):
+    history = []
+    for item in payload.get("history") or []:
+        if not isinstance(item, dict):
+            continue
+        role = (item.get("role") or "").strip().lower()
+        content = short_text(item.get("content", ""), 1200)
+        if role in {"user", "assistant"} and content:
+            history.append({"role": role, "content": content})
+        if len(history) >= 8:
+            break
+    return history
+
+
+def clean_facundo_reference(value):
+    cleaned = re.sub(r"^(?:il|la|lead)\s+", "", (value or "").strip(), flags=re.I)
+    cleaned = cleaned.strip(" \n\r\t.,:;!?\"'")
+    return short_text(cleaned, 180)
+
+
+def facundo_parse_due_at(text):
+    lower = (text or "").lower()
+    now = datetime.now().astimezone()
+    target = None
+    if "dopodomani" in lower:
+        target = now + timedelta(days=2)
+    elif "domani" in lower:
+        target = now + timedelta(days=1)
+    elif "oggi" in lower:
+        target = now
+    else:
+        iso_match = re.search(r"\b(\d{4})-(\d{2})-(\d{2})\b", lower)
+        if iso_match:
+            try:
+                target = datetime(int(iso_match.group(1)), int(iso_match.group(2)), int(iso_match.group(3)))
+            except ValueError:
+                target = None
+        else:
+            ita_match = re.search(r"\b(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\b", lower)
+            if ita_match:
+                year = int(ita_match.group(3) or now.year)
+                if year < 100:
+                    year += 2000
+                try:
+                    target = datetime(year, int(ita_match.group(2)), int(ita_match.group(1)))
+                except ValueError:
+                    target = None
+    if not target:
+        return ""
+    time_match = re.search(r"\b(?:alle|ore)\s*(\d{1,2})(?::(\d{2}))?\b", lower)
+    if time_match:
+        hour = max(0, min(int(time_match.group(1)), 23))
+        minute = max(0, min(int(time_match.group(2) or 0), 59))
+        return target.replace(hour=hour, minute=minute, second=0, microsecond=0).isoformat(timespec="seconds")
+    return target.date().isoformat()
+
+
+def facundo_match_details(matches):
+    return "\n".join(
+        f"#{item['id']} {item['company_name']} · {item.get('city') or '-'} · {item.get('stage') or '-'}"
+        for item in matches[:5]
+    )
+
+
+def facundo_lead_matches(conn, reference, limit=5):
+    reference = clean_facundo_reference(reference)
+    if not reference:
+        return []
+    try:
+        lead_id = int(reference)
+    except (TypeError, ValueError):
+        lead_id = 0
+    if lead_id > 0:
+        exact = conn.execute(
+            """
+            SELECT id, company_name, city, sector, category, stage, priority, score
+            FROM leads
+            WHERE id = ? AND deleted_at IS NULL
+            """,
+            (lead_id,),
+        ).fetchone()
+        if exact:
+            return [to_dict(exact)]
+    lowered = reference.lower()
+    like = f"%{lowered}%"
+    rows = conn.execute(
+        """
+        SELECT id, company_name, city, sector, category, stage, priority, score
+        FROM leads
+        WHERE deleted_at IS NULL
+          AND (
+            lower(company_name) = ?
+            OR lower(company_name) LIKE ?
+            OR lower(COALESCE(city, '')) LIKE ?
+            OR lower(COALESCE(sector, '')) LIKE ?
+          )
+        ORDER BY
+          CASE
+            WHEN lower(company_name) = ? THEN 0
+            WHEN lower(company_name) LIKE ? THEN 1
+            ELSE 2
+          END,
+          score DESC,
+          updated_at DESC
+        LIMIT ?
+        """,
+        (lowered, like, like, like, lowered, like, limit),
+    ).fetchall()
+    return [to_dict(row) for row in rows]
+
+
+def facundo_resolve_lead(conn, action):
+    try:
+        lead_id = int(action.get("lead_id") or 0)
+    except (TypeError, ValueError):
+        lead_id = 0
+    if lead_id > 0:
+        return get_lead(conn, lead_id), [], str(lead_id)
+    reference = action.get("lead_ref") or action.get("company_name") or action.get("search") or ""
+    reference = clean_facundo_reference(reference)
+    matches = facundo_lead_matches(conn, reference)
+    if not matches:
+        return None, [], reference
+    exact = [row for row in matches if row.get("company_name", "").lower() == reference.lower()]
+    if exact:
+        return get_lead(conn, exact[0]["id"]), matches, reference
+    if len(matches) == 1:
+        return get_lead(conn, matches[0]["id"]), matches, reference
+    return None, matches, reference
+
+
+def facundo_action_result(action_type, ok, title, summary, *, lead=None, details="", refresh=False):
+    return {
+        "type": action_type,
+        "ok": bool(ok),
+        "title": short_text(title, 120),
+        "summary": short_text(summary, 320),
+        "details": short_text(details, 2000),
+        "lead_id": lead.get("id") if lead else None,
+        "lead_name": lead.get("company_name", "") if lead else "",
+        "refresh": bool(refresh),
+    }
+
+
+def facundo_resolve_action_lead(conn, action, action_type):
+    lead, matches, reference = facundo_resolve_lead(conn, action)
+    if lead:
+        return lead, None
+    if matches:
+        return None, facundo_action_result(
+            action_type,
+            False,
+            "Lead ambiguo",
+            f"Ho trovato piu lead compatibili con '{reference or 'la richiesta'}'.",
+            details=facundo_match_details(matches),
+        )
+    return None, facundo_action_result(
+        action_type,
+        False,
+        "Lead non trovato",
+        f"Non trovo nessun lead compatibile con '{reference or 'la richiesta'}'.",
+    )
+
+
+def local_facundo_plan(context, message):
+    raw = short_text(message, 2400).strip()
+    lower = raw.lower()
+
+    reminder_match = re.search(r"\b(?:crea|aggiungi|imposta)\s+(?:un\s+)?reminder\s+(?:per|su)\s+(.+?)(?::\s*(.+))?$", raw, re.I)
+    if reminder_match:
+        lead_ref = clean_facundo_reference(reminder_match.group(1))
+        subject = short_text((reminder_match.group(2) or "").strip(), 240)
+        if lead_ref and subject:
+            due_at = facundo_parse_due_at(raw)
+            return {
+                "answer": f"Creo il reminder per {lead_ref}.",
+                "follow_ups": ["Vuoi che assegni anche una data piu precisa?", "Vuoi aprire il lead dopo la creazione?"],
+                "used_context": ["intento reminder", "azioni CRM live"],
+                "actions": [
+                    {
+                        "type": "create_reminder",
+                        "lead_ref": lead_ref,
+                        "subject": subject,
+                        "due_at": due_at,
+                    }
+                ],
+            }
+        return {
+            "answer": "Posso creare il reminder, ma senza provider AI attivo ho bisogno di una forma esplicita. Esempio: crea reminder per Rossi Serramenti: richiamare domani alle 10.",
+            "follow_ups": ["Vuoi che ti mostri un esempio di comando?", "Vuoi aprire prima il lead giusto?"],
+            "used_context": ["fallback locale"],
+            "actions": [],
+        }
+
+    for phrase, stage in FACUNDO_STAGE_ALIASES.items():
+        stage_match = re.search(rf"\b(?:sposta|porta|metti|aggiorna)\s+(.+?)\s+(?:in|a)\s+{re.escape(phrase)}\b", raw, re.I)
+        if stage_match:
+            lead_ref = clean_facundo_reference(stage_match.group(1))
+            return {
+                "answer": f"Aggiorno {lead_ref} alla fase {stage}.",
+                "follow_ups": ["Vuoi che aggiunga anche un follow-up?", "Vuoi aprire il lead dopo l'aggiornamento?"],
+                "used_context": ["pipeline CRM", "azioni CRM live"],
+                "actions": [{"type": "update_lead", "lead_ref": lead_ref, "stage": stage}],
+            }
+
+    priority_match = re.search(r"\b(?:metti|imposta|segna)\s+(.+?)\s+(?:con\s+)?priorit[aà]\s+(alta|media|bassa)\b", raw, re.I)
+    if priority_match:
+        lead_ref = clean_facundo_reference(priority_match.group(1))
+        priority = FACUNDO_PRIORITY_ALIASES.get(priority_match.group(2).lower(), "")
+        return {
+            "answer": f"Imposto {lead_ref} con priorita {priority}.",
+            "follow_ups": ["Vuoi che aggiorni anche la fase?", "Vuoi aprire il lead dopo l'aggiornamento?"],
+            "used_context": ["priorita lead", "azioni CRM live"],
+            "actions": [{"type": "update_lead", "lead_ref": lead_ref, "priority": priority}],
+        }
+
+    open_match = re.search(r"\b(?:apri|mostra|seleziona)\s+(?:il\s+)?lead\s+(.+)$", raw, re.I)
+    if open_match:
+        lead_ref = clean_facundo_reference(open_match.group(1))
+        return {
+            "answer": f"Ti preparo il lead {lead_ref}.",
+            "follow_ups": ["Vuoi anche un riepilogo del lead?", "Vuoi creare un reminder sullo stesso lead?"],
+            "used_context": ["database lead", "azioni CRM live"],
+            "actions": [{"type": "open_lead", "lead_ref": lead_ref}],
+        }
+
+    message_match = re.search(r"\b(?:scrivi|genera|prepara)\s+(?:un\s+)?messaggio\s+(?:per|su)\s+(.+)$", raw, re.I)
+    if message_match:
+        lead_ref = clean_facundo_reference(message_match.group(1))
+        return {
+            "answer": f"Genero una bozza di messaggio per {lead_ref}.",
+            "follow_ups": ["Vuoi una versione email o WhatsApp?", "Vuoi prima fare il research del lead?"],
+            "used_context": ["messaggi CRM", "azioni CRM live"],
+            "actions": [{"type": "generate_message", "lead_ref": lead_ref, "channel": "email", "ai": True}],
+        }
+
+    research_match = re.search(r"\b(?:fai|genera|esegui|lancia)?\s*research\s+(?:per|su)\s+(.+)$", raw, re.I)
+    if research_match:
+        lead_ref = clean_facundo_reference(research_match.group(1))
+        return {
+            "answer": f"Avvio la research per {lead_ref}.",
+            "follow_ups": ["Vuoi anche il messaggio commerciale dopo la research?", "Vuoi aprire il lead aggiornato?"],
+            "used_context": ["research lead", "azioni CRM live"],
+            "actions": [{"type": "research_lead", "lead_ref": lead_ref, "ai": True}],
+        }
+
+    score_match = re.search(r"\b(?:fai|calcola|genera|esegui)?\s*(?:ai\s*)?score\s+(?:per|su)\s+(.+)$", raw, re.I)
+    if score_match:
+        lead_ref = clean_facundo_reference(score_match.group(1))
+        return {
+            "answer": f"Calcolo l'AI score per {lead_ref}.",
+            "follow_ups": ["Vuoi anche una bozza di messaggio dopo lo score?", "Vuoi aprire il lead aggiornato?"],
+            "used_context": ["ai scoring", "azioni CRM live"],
+            "actions": [{"type": "score_lead", "lead_ref": lead_ref}],
+        }
+
+    create_lead_match = re.search(r"\bcrea(?:mi)?\s+(?:un\s+)?lead(?:\s+per)?\s+(.+)$", raw, re.I)
+    if create_lead_match and "reminder" not in lower:
+        company_name = clean_facundo_reference(create_lead_match.group(1))
+        if company_name:
+            return {
+                "answer": f"Creo il lead {company_name}.",
+                "follow_ups": ["Vuoi aggiungere anche citta o sito?", "Vuoi aprire il lead appena creato?"],
+                "used_context": ["creazione lead", "azioni CRM live"],
+                "actions": [{"type": "create_lead", "company_name": company_name}],
+            }
+
+    if any(keyword in lower for keyword in {"backup", "csv", "launchd", "plist", "env", "fly", "deploy", "produzione", "volume"}):
+        return local_assistant_reply(context, message)
+
+    if any(keyword in lower for keyword in {"apri", "sposta", "porta", "metti", "aggiorna", "crea", "genera", "prepara", "research", "score"}):
+        return {
+            "answer": "Posso farlo, ma senza provider AI attivo ho bisogno di un comando piu esplicito oppure della forma guidata. Esempio: apri lead Rossi Serramenti oppure crea reminder per Rossi Serramenti: richiamare domani alle 10.",
+            "follow_ups": ["Vuoi che ti mostri i formati supportati in fallback locale?", "Vuoi che riassuma prima i lead rilevanti?"],
+            "used_context": ["fallback locale"],
+            "actions": [],
+        }
+
+    return local_assistant_reply(context, message)
+
+
+def execute_facundo_action(conn, action, current_user):
+    action_type = (action.get("type") or "").strip()
+    current_user = current_user or {}
+
+    if action_type == "search_leads":
+        reference = action.get("search") or action.get("lead_ref") or ""
+        matches = facundo_lead_matches(conn, reference)
+        if not matches:
+            return facundo_action_result(action_type, False, "Nessun lead trovato", f"Nessun lead compatibile con '{reference}'.")
+        if len(matches) == 1:
+            lead = get_lead(conn, matches[0]["id"])
+            return facundo_action_result(
+                action_type,
+                True,
+                "Lead trovato",
+                f"Trovato un lead compatibile: {lead['company_name']}.",
+                lead=lead,
+                details=facundo_match_details(matches),
+            )
+        return facundo_action_result(
+            action_type,
+            True,
+            "Lead compatibili",
+            f"Ho trovato {len(matches)} lead compatibili.",
+            details=facundo_match_details(matches),
+        )
+
+    if action_type == "create_lead":
+        company_name = clean_facundo_reference(action.get("company_name") or action.get("lead_ref") or "")
+        if not company_name:
+            return facundo_action_result(action_type, False, "Creazione non eseguita", "Per creare un lead serve almeno il nome azienda.")
+        payload = {
+            "company_name": company_name,
+            "sector": short_text(action.get("sector", ""), 120),
+            "city": short_text(action.get("city", ""), 120),
+            "website": short_text(action.get("website", ""), 240),
+            "source": short_text(action.get("source", ""), 120),
+            "notes": short_text(action.get("notes", ""), 1200),
+            "opportunity": short_text(action.get("opportunity", ""), 1200),
+            "pain_points": short_text(action.get("pain_points", ""), 800),
+            "next_follow_up": short_text(action.get("next_follow_up", ""), 120),
+        }
+        if action.get("category") in CATEGORIES:
+            payload["category"] = action.get("category")
+        if action.get("stage") in STAGES:
+            payload["stage"] = action.get("stage")
+        if action.get("priority") in PRIORITIES:
+            payload["priority"] = action.get("priority")
+        lead_id = create_lead(conn, payload)
+        lead = get_lead(conn, lead_id)
+        return facundo_action_result(
+            action_type,
+            True,
+            "Lead creato",
+            f"Ho creato il lead {lead['company_name']}.",
+            lead=lead,
+            details=f"Fase: {lead.get('stage') or '-'}\nPriorita: {lead.get('priority') or '-'}",
+            refresh=True,
+        )
+
+    lead, error = facundo_resolve_action_lead(conn, action, action_type)
+    if error:
+        return error
+
+    if action_type == "open_lead":
+        return facundo_action_result(
+            action_type,
+            True,
+            "Lead aperto",
+            f"Ho trovato {lead['company_name']}.",
+            lead=lead,
+            details=f"{lead.get('city') or '-'} · {lead.get('stage') or '-'} · score {lead.get('score', 0)}/100",
+        )
+
+    if action_type == "update_lead":
+        updates = {}
+        for key in ["company_name", "sector", "city", "website", "source", "notes", "opportunity", "pain_points", "next_follow_up"]:
+            value = short_text(action.get(key, ""), 1600 if key in {"notes", "opportunity", "pain_points"} else 240).strip()
+            if value:
+                updates[key] = value
+        if action.get("category") in CATEGORIES:
+            updates["category"] = action.get("category")
+        if action.get("stage") in STAGES:
+            updates["stage"] = action.get("stage")
+        if action.get("priority") in PRIORITIES:
+            updates["priority"] = action.get("priority")
+        if not updates:
+            return facundo_action_result(action_type, False, "Aggiornamento non eseguito", "Non ho ricevuto campi validi da aggiornare.", lead=lead)
+        update_lead(conn, lead["id"], updates)
+        refreshed = get_lead(conn, lead["id"])
+        labels = {
+            "stage": "Fase",
+            "priority": "Priorita",
+            "category": "Categoria",
+            "next_follow_up": "Follow-up",
+            "city": "Citta",
+            "website": "Sito",
+            "notes": "Note",
+        }
+        details = "\n".join(f"{labels.get(key, key)}: {value}" for key, value in updates.items())
+        return facundo_action_result(
+            action_type,
+            True,
+            "Lead aggiornato",
+            f"Ho aggiornato {refreshed['company_name']}.",
+            lead=refreshed,
+            details=details,
+            refresh=True,
+        )
+
+    if action_type == "create_reminder":
+        subject = short_text(action.get("subject") or action.get("body") or "", 240).strip()
+        if not subject:
+            return facundo_action_result(action_type, False, "Reminder non creato", "Per creare un reminder serve almeno un titolo.", lead=lead)
+        due_at = short_text(action.get("due_at") or "", 120).strip() or facundo_parse_due_at(f"{subject} {action.get('body') or ''}")
+        row = create_reminder(
+            conn,
+            {
+                "lead_id": lead["id"],
+                "subject": subject,
+                "body": short_text(action.get("body", ""), 1200),
+                "due_at": due_at,
+                "notify_at": short_text(action.get("notify_at") or due_at, 120),
+                "assigned_user_id": action.get("assigned_user_id") or current_user.get("id"),
+            },
+            current_user,
+        )
+        reminder = reminder_payload(row)
+        return facundo_action_result(
+            action_type,
+            True,
+            "Reminder creato",
+            f"Ho creato un reminder per {lead['company_name']}.",
+            lead=lead,
+            details=f"{reminder.get('subject')}\nScadenza: {reminder.get('due_at') or 'non impostata'}",
+            refresh=True,
+        )
+
+    if action_type == "generate_message":
+        message = build_message(
+            conn,
+            lead["id"],
+            {
+                "channel": action.get("channel") if action.get("channel") in {"email", "whatsapp", "dm", "call"} else "email",
+                "offer": short_text(action.get("offer", ""), 600),
+                "ai": bool(action.get("ai", True)) if active_ai_provider(conn, require_key=False) else False,
+            },
+        )
+        if not message:
+            return facundo_action_result(action_type, False, "Messaggio non disponibile", "Non sono riuscito a generare il messaggio.", lead=lead)
+        details = "\n\n".join(part for part in [f"Oggetto: {message.get('subject')}" if message.get("subject") else "", message.get("body", "")] if part)
+        return facundo_action_result(
+            action_type,
+            True,
+            "Messaggio generato",
+            f"Ho preparato una bozza {message.get('channel') or 'email'} per {lead['company_name']}.",
+            lead=lead,
+            details=details,
+        )
+
+    if action_type == "research_lead":
+        result = research_lead(conn, lead["id"], {"ai": bool(action.get("ai", True))})
+        research = (result or {}).get("research", {}) or {}
+        refreshed = (result or {}).get("lead") or get_lead(conn, lead["id"])
+        details = "\n".join(
+            part
+            for part in [
+                f"Problema: {research.get('primary_problem')}" if research.get("primary_problem") else "",
+                f"Offerta: {research.get('recommended_offer')}" if research.get("recommended_offer") else "",
+                f"Canale: {research.get('best_channel')}" if research.get("best_channel") else "",
+            ]
+            if part
+        )
+        return facundo_action_result(
+            action_type,
+            True,
+            "Research completata",
+            f"Ho aggiornato la research per {refreshed['company_name']}.",
+            lead=refreshed,
+            details=details or "Research salvata nelle attivita del lead.",
+            refresh=True,
+        )
+
+    if action_type == "score_lead":
+        if not active_ai_provider(conn, require_key=False):
+            return facundo_action_result(
+                action_type,
+                False,
+                "AI score non disponibile",
+                "Per eseguire lo scoring serve Claude o OpenAI configurato nella pagina Provider.",
+                lead=lead,
+            )
+        result = ai_score_lead(conn, lead["id"])
+        refreshed = (result or {}).get("lead") or get_lead(conn, lead["id"])
+        analysis = (result or {}).get("analysis", {}) or {}
+        details = "\n".join(
+            part
+            for part in [
+                f"Score: {analysis.get('score')}" if analysis.get("score") is not None else "",
+                f"Categoria: {analysis.get('category')}" if analysis.get("category") else "",
+                f"Priorita: {analysis.get('priority')}" if analysis.get("priority") else "",
+                f"Next action: {analysis.get('next_action')}" if analysis.get("next_action") else "",
+            ]
+            if part
+        )
+        return facundo_action_result(
+            action_type,
+            True,
+            "AI score completato",
+            f"Ho ricalcolato score e priorita di {refreshed['company_name']}.",
+            lead=refreshed,
+            details=details,
+            refresh=True,
+        )
+
+    return facundo_action_result(action_type or "unknown", False, "Azione non supportata", "Questa azione non e supportata da Facundo.")
+
+
+def assistant_chat(conn, payload, current_user=None):
+    message = short_text(payload.get("message", ""), 2400)
+    if not message.strip():
+        raise ValueError("Scrivi un messaggio per Facundo")
+    history = assistant_history_snapshot(payload)
+
+    context = assistant_context_snapshot(conn, message)
+    provider = active_ai_provider(conn, require_key=False)
+    warning = ""
+    if provider:
+        try:
+            result, provider = ai_json(
+                conn,
+                (
+                    f"Sei {FACUNDO_NAME}, copilota operativo di un CRM lead B2B locale. "
+                    "Rispondi in italiano, in modo pratico, breve ma utile. "
+                    "Usa solo il contesto fornito: dati CRM, strategia, reminder, note interne e documentazione operativa. "
+                    "Se un dato non c'e, dichiaralo chiaramente senza inventare. "
+                    "Se la richiesta e informativa, rispondi e lascia actions vuoto. "
+                    "Se la richiesta richiede un'azione, puoi usare solo le azioni consentite e al massimo 3 azioni. "
+                    "Non usare azioni distruttive, non eliminare lead, non cambiare utenti o impostazioni. "
+                    "Se manca un dato obbligatorio o il lead non e identificabile con sufficiente sicurezza, non creare azioni e chiedi chiarimento. "
+                    "Per lead esistenti preferisci lead_id se disponibile nel contesto; altrimenti usa lead_ref."
+                ),
+                {
+                    "question": message,
+                    "history": history,
+                    "today": datetime.now().astimezone().date().isoformat(),
+                    "allowed_actions": FACUNDO_ACTION_TYPES,
+                    "crm": context,
+                },
+                assistant_chat_schema(),
+                "facundo_chat",
+            )
+        except ValueError as exc:
+            result = local_facundo_plan(context, message)
+            provider = "locale"
+            warning = f"AI esterna non disponibile: {str(exc)[:180]}"
+    else:
+        result = local_facundo_plan(context, message)
+        provider = "locale"
+    executed_actions = []
+    for action in (result.get("actions") or [])[:3]:
+        if isinstance(action, dict):
+            executed_actions.append(execute_facundo_action(conn, action, current_user))
+    refresh_required = any(item.get("refresh") for item in executed_actions if item.get("ok"))
+    selected_lead_id = next((item.get("lead_id") for item in executed_actions if item.get("ok") and item.get("lead_id")), None)
+    result["used_context"] = list(result.get("used_context") or [])
+    if executed_actions and "azioni CRM live" not in result["used_context"]:
+        result["used_context"].append("azioni CRM live")
+    result["actions"] = []
+    return {
+        "reply": result,
+        "provider": provider,
+        "warning": warning,
+        "executed_actions": executed_actions,
+        "refresh_required": refresh_required,
+        "selected_lead_id": selected_lead_id,
     }
 
 
@@ -3762,6 +4755,8 @@ class CRMHandler(BaseHTTPRequestHandler):
                         "stats": stats(conn),
                     }
                 )
+            if path == "/api/info":
+                return self.send_json({"info": info_snapshot(conn)})
             if path == "/api/settings":
                 return self.send_json({"settings": settings_snapshot(conn)})
             if path == "/api/strategy":
@@ -3841,10 +4836,15 @@ class CRMHandler(BaseHTTPRequestHandler):
                 return self.send_json({"user": user}, status=201)
             if path == "/api/settings":
                 return self.send_json({"settings": save_settings(conn, payload)})
+            if path == "/api/info":
+                set_setting(conn, "assistant_knowledge", (payload.get("assistant_knowledge") or "").strip())
+                return self.send_json({"info": info_snapshot(conn)})
             if path == "/api/strategy":
                 return self.send_json({"strategy": save_strategy(conn, payload)})
             if path == "/api/ai-control":
                 return self.send_json({"ai_control": save_ai_control(conn, payload)})
+            if path in {"/api/assistant/chat", "/api/facundo/chat"}:
+                return self.send_json(assistant_chat(conn, payload, current_user))
             if path == "/api/import/leads":
                 rows = payload.get("rows", [])
                 created = []
