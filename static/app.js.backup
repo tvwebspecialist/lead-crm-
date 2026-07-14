@@ -199,23 +199,7 @@ async function logout() {
   toast("Sessione chiusa");
 }
 
-function initTheme() {
-  const savedTheme = localStorage.getItem("crm-theme") || "dark";
-  if (savedTheme === "light") {
-    document.body.classList.add("light-theme");
-  } else {
-    document.body.classList.remove("light-theme");
-  }
-}
-
-function toggleTheme() {
-  const isLight = document.body.classList.toggle("light-theme");
-  localStorage.setItem("crm-theme", isLight ? "light" : "dark");
-  toast(isLight ? "Tema chiaro attivato" : "Tema scuro attivato");
-}
-
 async function init() {
-  initTheme();
   bindAuthEvents();
   const session = await api("/api/session");
   state.roles = session.roles || {};
@@ -274,7 +258,6 @@ function bindEvents() {
 
   $("#logoutBtn").addEventListener("click", logout);
   $("#refreshBtn").addEventListener("click", refreshAll);
-  $("#themeToggleBtn").addEventListener("click", toggleTheme);
   $("#newLeadBtn").addEventListener("click", () => openLeadDialog());
   $("#exportBtn").addEventListener("click", () => {
     window.location.href = "/api/export/leads.csv";

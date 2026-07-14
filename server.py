@@ -15,6 +15,7 @@ import sqlite3
 import sys
 import threading
 import time
+import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -43,7 +44,7 @@ ROLE_LABELS = {
 BOOTSTRAP_SUPER_ADMIN = {
     "email": "t.v.webspecialist@gmail.com",
     "name": "Tommaso",
-    "password_hash": "pbkdf2_sha256$260000$ypvXVIbX6z5zHj16LCqgxw$ShNFyvaZPVKpzEOu6xv6S3cZ5NeQeUNAGyOrn3fHFHQ",
+    "password_hash": "pbkdf2_sha256$260000$JfIaMmEE21LDB4f2/SKzZg$y5G7YggwUAm2OrS657AlKfpsD8Rcw7Ibz9aPji6V3GI",
 }
 
 STAGES = [
@@ -101,6 +102,32 @@ SETTING_KEYS = {
 DEFAULT_OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.2")
 DEFAULT_ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
 AI_PROVIDERS = {"auto", "anthropic", "openai"}
+OVERPASS_ENDPOINTS = [url.strip() for url in os.environ.get("CRM_OVERPASS_URLS", "").split(",") if url.strip()] or [
+    "https://lz4.overpass-api.de/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
+]
+ANTHROPIC_MODEL_OPTIONS = [
+    {
+        "id": "claude-sonnet-5",
+        "label": "Claude Sonnet 5",
+        "summary": "Miglior equilibrio tra intelligenza, velocita e costo per il CRM.",
+    },
+    {
+        "id": "claude-opus-4-8",
+        "label": "Claude Opus 4.8",
+        "summary": "Piu capace per analisi complesse, reasoning e compiti piu pesanti.",
+    },
+    {
+        "id": "claude-haiku-4-5",
+        "label": "Claude Haiku 4.5",
+        "summary": "Piu veloce ed economico per alti volumi e bassa latenza.",
+    },
+    {
+        "id": "claude-fable-5",
+        "label": "Claude Fable 5",
+        "summary": "Massima capacita disponibile per ragionamento avanzato e lavoro agentico.",
+    },
+]
 PUBLIC_APP_URL = os.environ.get("CRM_PUBLIC_BASE_URL", "https://lead-crm-tommaso.fly.dev").strip() or "https://lead-crm-tommaso.fly.dev"
 PUBLIC_APP_NAME = os.environ.get("CRM_PUBLIC_APP_NAME", "lead-crm-tommaso").strip() or "lead-crm-tommaso"
 PRIMARY_REGION = os.environ.get("CRM_PRIMARY_REGION", "fra").strip() or "fra"
@@ -860,6 +887,14 @@ def resolve_openai_api_key(conn):
     return (get_setting(conn, "openai_api_key") or os.environ.get("OPENAI_API_KEY") or "").strip()
 
 
+def normalize_anthropic_model(value):
+    model = (value or "").strip()
+    if not model:
+        return DEFAULT_ANTHROPIC_MODEL
+    valid = {item["id"] for item in ANTHROPIC_MODEL_OPTIONS}
+    return model if model in valid else model
+
+
 def normalize_ai_provider(value):
     provider = (value or "auto").strip().lower()
     if provider not in AI_PROVIDERS:
@@ -913,7 +948,7 @@ def settings_snapshot(conn):
     anthropic_key = (anthropic_setting or anthropic_env or "").strip()
     openai_key = (openai_setting or openai_env or "").strip()
     openai_model = (get_setting(conn, "openai_model") or DEFAULT_OPENAI_MODEL).strip()
-    anthropic_model = (get_setting(conn, "anthropic_model") or DEFAULT_ANTHROPIC_MODEL).strip()
+    anthropic_model = normalize_anthropic_model(get_setting(conn, "anthropic_model") or DEFAULT_ANTHROPIC_MODEL)
     ai_provider = normalize_ai_provider(get_setting(conn, "ai_provider") or os.environ.get("AI_PROVIDER") or "auto")
     return {
         "google_places_configured": bool(google_key),
@@ -925,6 +960,7 @@ def settings_snapshot(conn):
         "anthropic_key": mask_secret(anthropic_key),
         "anthropic_source": "CRM" if anthropic_setting else ("Mac" if anthropic_env else ""),
         "anthropic_model": anthropic_model,
+        "anthropic_models": ANTHROPIC_MODEL_OPTIONS,
         "openai_configured": bool(openai_key),
         "openai_key": mask_secret(openai_key),
         "openai_source": "CRM" if openai_setting else ("Mac" if openai_env else ""),
@@ -947,8 +983,8 @@ def save_settings(conn, payload):
             value = "1" if value.lower() in {"1", "true", "yes", "on", "si", "sì"} else "0"
         if key == "ai_provider":
             value = normalize_ai_provider(value)
-        if key == "anthropic_model" and not value:
-            value = DEFAULT_ANTHROPIC_MODEL
+        if key == "anthropic_model":
+            value = normalize_anthropic_model(value)
         if key == "openai_model" and not value:
             value = DEFAULT_OPENAI_MODEL
         set_setting(conn, key, value)
@@ -2188,13 +2224,22 @@ def overpass_search(city, sector_key, limit):
     area = geocode_city(city)
     query = build_overpass_query(area["bbox"], sector_key, limit)
     body = urllib.parse.urlencode({"data": query}).encode("utf-8")
-    data = fetch_json(
-        "https://overpass-api.de/api/interpreter",
-        data=body,
-        timeout=35,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-    )
-    return area, data.get("elements", [])
+    last_error = None
+    for endpoint in OVERPASS_ENDPOINTS:
+        try:
+            data = fetch_json(
+                endpoint,
+                data=body,
+                timeout=35,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            return area, data.get("elements", [])
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+            last_error = exc
+            print(f"Overpass request failed via {endpoint}: {exc}", file=sys.stderr)
+    if last_error:
+        raise ValueError("Ricerca OpenStreetMap temporaneamente non disponibile. Riprova tra poco.") from last_error
+    raise ValueError("Ricerca OpenStreetMap temporaneamente non disponibile. Riprova tra poco.")
 
 
 def first_tag(tags, names):
@@ -4681,6 +4726,7 @@ class CRMHandler(BaseHTTPRequestHandler):
                 return self.handle_api_get(path, query)
             return self.serve_static(path)
         except Exception as exc:
+            traceback.print_exc()
             self.send_error_json(str(exc), status=500)
 
     def do_POST(self):
@@ -4692,6 +4738,7 @@ class CRMHandler(BaseHTTPRequestHandler):
         except PermissionError as exc:
             self.send_error_json(str(exc), status=403)
         except Exception as exc:
+            traceback.print_exc()
             self.send_error_json(str(exc), status=500)
 
     def do_PATCH(self):
@@ -4703,6 +4750,7 @@ class CRMHandler(BaseHTTPRequestHandler):
         except PermissionError as exc:
             self.send_error_json(str(exc), status=403)
         except Exception as exc:
+            traceback.print_exc()
             self.send_error_json(str(exc), status=500)
 
     def do_DELETE(self):
@@ -4710,6 +4758,7 @@ class CRMHandler(BaseHTTPRequestHandler):
         try:
             return self.handle_api_delete(parsed.path)
         except Exception as exc:
+            traceback.print_exc()
             self.send_error_json(str(exc), status=500)
 
     def serve_static(self, path):
