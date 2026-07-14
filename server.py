@@ -44,7 +44,7 @@ ROLE_LABELS = {
 BOOTSTRAP_SUPER_ADMIN = {
     "email": "t.v.webspecialist@gmail.com",
     "name": "Tommaso",
-    "password_hash": "pbkdf2_sha256$260000$JfIaMmEE21LDB4f2/SKzZg$y5G7YggwUAm2OrS657AlKfpsD8Rcw7Ibz9aPji6V3GI",
+    "password_hash": "pbkdf2_sha256$260000$Bh0kJPGZOiKXSeXDIc8xXw$vWmyg0NrGTBzslGVxdF7qARVWwss9zaAAXkkgd0HzXU",
 }
 
 STAGES = [
